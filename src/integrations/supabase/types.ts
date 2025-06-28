@@ -17,6 +17,7 @@ export type Database = {
           crop: string | null
           date: string
           description: string
+          expense_date: string | null
           id: string
           updated_at: string
           user_id: string | null
@@ -28,6 +29,7 @@ export type Database = {
           crop?: string | null
           date: string
           description: string
+          expense_date?: string | null
           id?: string
           updated_at?: string
           user_id?: string | null
@@ -39,8 +41,45 @@ export type Database = {
           crop?: string | null
           date?: string
           description?: string
+          expense_date?: string | null
           id?: string
           updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      inventory: {
+        Row: {
+          category: string
+          created_at: string | null
+          id: string
+          item_name: string
+          low_stock_threshold: number | null
+          quantity: number
+          unit_price: number
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          category: string
+          created_at?: string | null
+          id?: string
+          item_name: string
+          low_stock_threshold?: number | null
+          quantity?: number
+          unit_price: number
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string | null
+          id?: string
+          item_name?: string
+          low_stock_threshold?: number | null
+          quantity?: number
+          unit_price?: number
+          updated_at?: string | null
           user_id?: string | null
         }
         Relationships: []
@@ -87,6 +126,45 @@ export type Database = {
         }
         Relationships: []
       }
+      monthly_reports: {
+        Row: {
+          created_at: string | null
+          id: string
+          month: number
+          net_profit: number | null
+          report_data: Json | null
+          report_url: string | null
+          total_expenses: number | null
+          total_sales: number | null
+          user_id: string | null
+          year: number
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          month: number
+          net_profit?: number | null
+          report_data?: Json | null
+          report_url?: string | null
+          total_expenses?: number | null
+          total_sales?: number | null
+          user_id?: string | null
+          year: number
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          month?: number
+          net_profit?: number | null
+          report_data?: Json | null
+          report_url?: string | null
+          total_expenses?: number | null
+          total_sales?: number | null
+          user_id?: string | null
+          year?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -105,6 +183,45 @@ export type Database = {
           full_name?: string | null
           id?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      sales: {
+        Row: {
+          bill_url: string | null
+          created_at: string | null
+          customer_email: string | null
+          customer_name: string | null
+          customer_phone: string | null
+          id: string
+          items: Json
+          qr_code_url: string | null
+          total_amount: number
+          user_id: string | null
+        }
+        Insert: {
+          bill_url?: string | null
+          created_at?: string | null
+          customer_email?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          items: Json
+          qr_code_url?: string | null
+          total_amount: number
+          user_id?: string | null
+        }
+        Update: {
+          bill_url?: string | null
+          created_at?: string | null
+          customer_email?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          items?: Json
+          qr_code_url?: string | null
+          total_amount?: number
+          user_id?: string | null
         }
         Relationships: []
       }
