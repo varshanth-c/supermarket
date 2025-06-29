@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Search, Edit, Trash2, Package } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 interface InventoryItem {
   id: string;
@@ -18,75 +21,17 @@ interface InventoryItem {
   category: string;
   quantity: number;
   unit_price: number;
-  low_stock_alert: number;
+  low_stock_threshold: number;
 }
 
 const Inventory = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
-
-  // Mock data - replace with Supabase integration
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([
-    {
-      id: '1',
-      item_name: 'Tomato',
-      category: 'Vegetables',
-      quantity: 50,
-      unit_price: 25,
-      low_stock_alert: 10
-    },
-    {
-      id: '2',
-      item_name: 'Onion',
-      category: 'Vegetables',
-      quantity: 30,
-      unit_price: 20,
-      low_stock_alert: 15
-    },
-    {
-      id: '3',
-      item_name: 'Potato',
-      category: 'Vegetables',
-      quantity: 80,
-      unit_price: 15,
-      low_stock_alert: 20
-    },
-    {
-      id: '4',
-      item_name: 'Soap',
-      category: 'Toiletries',
-      quantity: 25,
-      unit_price: 45,
-      low_stock_alert: 5
-    },
-    {
-      id: '5',
-      item_name: 'Shampoo',
-      category: 'Toiletries',
-      quantity: 15,
-      unit_price: 120,
-      low_stock_alert: 5
-    },
-    {
-      id: '6',
-      item_name: 'Bread',
-      category: 'Others',
-      quantity: 40,
-      unit_price: 35,
-      low_stock_alert: 10
-    },
-    {
-      id: '7',
-      item_name: 'Milk',
-      category: 'Others',
-      quantity: 20,
-      unit_price: 55,
-      low_stock_alert: 8
-    }
-  ]);
 
   const categories = ['Vegetables', 'Toiletries', 'Others', 'Snacks', 'Beverages'];
 
@@ -95,7 +40,126 @@ const Inventory = () => {
     category: '',
     quantity: 0,
     unit_price: 0,
-    low_stock_alert: 0
+    low_stock_threshold: 10
+  });
+
+  // Fetch inventory items
+  const { data: inventoryItems = [], isLoading } = useQuery({
+    queryKey: ['inventory', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id
+  });
+
+  // Add item mutation
+  const addItemMutation = useMutation({
+    mutationFn: async (item: typeof newItem) => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .insert([{ ...item, user_id: user!.id }])
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      setNewItem({
+        item_name: '',
+        category: '',
+        quantity: 0,
+        unit_price: 0,
+        low_stock_threshold: 10
+      });
+      setIsAddDialogOpen(false);
+      toast({
+        title: "Success",
+        description: "Item added to inventory successfully"
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to add item",
+        variant: "destructive"
+      });
+      console.error('Add item error:', error);
+    }
+  });
+
+  // Update item mutation
+  const updateItemMutation = useMutation({
+    mutationFn: async (item: InventoryItem) => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .update({
+          item_name: item.item_name,
+          category: item.category,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          low_stock_threshold: item.low_stock_threshold
+        })
+        .eq('id', item.id)
+        .eq('user_id', user!.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      setEditingItem(null);
+      toast({
+        title: "Success",
+        description: "Item updated successfully"
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to update item",
+        variant: "destructive"
+      });
+      console.error('Update item error:', error);
+    }
+  });
+
+  // Delete item mutation
+  const deleteItemMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('inventory')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user!.id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      toast({
+        title: "Success",
+        description: "Item deleted successfully"
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to delete item",
+        variant: "destructive"
+      });
+      console.error('Delete item error:', error);
+    }
   });
 
   const filteredItems = inventoryItems.filter(item => {
@@ -114,56 +178,39 @@ const Inventory = () => {
       });
       return;
     }
-
-    const item: InventoryItem = {
-      id: Date.now().toString(),
-      ...newItem
-    };
-
-    setInventoryItems([...inventoryItems, item]);
-    setNewItem({
-      item_name: '',
-      category: '',
-      quantity: 0,
-      unit_price: 0,
-      low_stock_alert: 0
-    });
-    setIsAddDialogOpen(false);
-    
-    toast({
-      title: "Success",
-      description: "Item added to inventory successfully"
-    });
+    addItemMutation.mutate(newItem);
   };
 
   const handleEditItem = (item: InventoryItem) => {
-    setInventoryItems(inventoryItems.map(i => i.id === item.id ? item : i));
-    setEditingItem(null);
-    
-    toast({
-      title: "Success",
-      description: "Item updated successfully"
-    });
+    updateItemMutation.mutate(item);
   };
 
   const handleDeleteItem = (id: string) => {
-    setInventoryItems(inventoryItems.filter(item => item.id !== id));
-    
-    toast({
-      title: "Success",
-      description: "Item deleted successfully"
-    });
+    deleteItemMutation.mutate(id);
   };
 
   const getStockStatus = (item: InventoryItem) => {
-    if (item.quantity <= item.low_stock_alert) {
+    if (item.quantity <= item.low_stock_threshold) {
       return { status: 'Low Stock', color: 'bg-red-100 text-red-800' };
     }
-    if (item.quantity <= item.low_stock_alert * 2) {
+    if (item.quantity <= item.low_stock_threshold * 2) {
       return { status: 'Medium Stock', color: 'bg-yellow-100 text-yellow-800' };
     }
     return { status: 'In Stock', color: 'bg-green-100 text-green-800' };
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -237,13 +284,15 @@ const Inventory = () => {
                   <Input
                     id="low-stock"
                     type="number"
-                    value={newItem.low_stock_alert}
-                    onChange={(e) => setNewItem({...newItem, low_stock_alert: parseInt(e.target.value) || 0})}
+                    value={newItem.low_stock_threshold}
+                    onChange={(e) => setNewItem({...newItem, low_stock_threshold: parseInt(e.target.value) || 0})}
                   />
                 </div>
               </div>
               <DialogFooter>
-                <Button onClick={handleAddItem}>Add Item</Button>
+                <Button onClick={handleAddItem} disabled={addItemMutation.isPending}>
+                  {addItemMutation.isPending ? 'Adding...' : 'Add Item'}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -325,6 +374,7 @@ const Inventory = () => {
                               size="sm"
                               variant="outline"
                               onClick={() => setEditingItem(item)}
+                              disabled={updateItemMutation.isPending}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
@@ -332,6 +382,7 @@ const Inventory = () => {
                               size="sm"
                               variant="outline"
                               onClick={() => handleDeleteItem(item.id)}
+                              disabled={deleteItemMutation.isPending}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -403,13 +454,15 @@ const Inventory = () => {
                   <Input
                     id="edit-low-stock"
                     type="number"
-                    value={editingItem.low_stock_alert}
-                    onChange={(e) => setEditingItem({...editingItem, low_stock_alert: parseInt(e.target.value) || 0})}
+                    value={editingItem.low_stock_threshold}
+                    onChange={(e) => setEditingItem({...editingItem, low_stock_threshold: parseInt(e.target.value) || 0})}
                   />
                 </div>
               </div>
               <DialogFooter>
-                <Button onClick={() => handleEditItem(editingItem)}>Update Item</Button>
+                <Button onClick={() => handleEditItem(editingItem)} disabled={updateItemMutation.isPending}>
+                  {updateItemMutation.isPending ? 'Updating...' : 'Update Item'}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

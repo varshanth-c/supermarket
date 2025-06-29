@@ -1,44 +1,66 @@
 
 import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { Package, TrendingUp, DollarSign, FileText, ShoppingCart, Receipt } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
-  const statsCards = [
-    {
-      title: "Total Sales",
-      value: "₹15,240",
-      description: "This month",
-      icon: TrendingUp,
-      color: "text-green-600"
+  // Fetch dashboard data
+  const { data: dashboardData, isLoading } = useQuery({
+    queryKey: ['dashboard', user?.id],
+    queryFn: async () => {
+      const [inventoryRes, salesRes, expensesRes] = await Promise.all([
+        supabase.from('inventory').select('*').eq('user_id', user!.id),
+        supabase.from('sales').select('*').eq('user_id', user!.id),
+        supabase.from('expenses').select('*').eq('user_id', user!.id)
+      ]);
+
+      const inventory = inventoryRes.data || [];
+      const sales = salesRes.data || [];
+      const expenses = expensesRes.data || [];
+
+      // Calculate totals
+      const totalSales = sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0);
+      const totalExpenses = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+      const netProfit = totalSales - totalExpenses;
+      const activeItems = inventory.length;
+
+      // Recent activity (last 5 transactions)
+      const recentSales = sales.slice(0, 3).map(sale => ({
+        type: 'sale',
+        description: `Sale to ${sale.customer_name || 'Customer'}`,
+        amount: Number(sale.total_amount),
+        date: new Date(sale.created_at!)
+      }));
+
+      const recentExpenses = expenses.slice(0, 2).map(expense => ({
+        type: 'expense',
+        description: expense.description,
+        amount: Number(expense.amount),
+        date: new Date(expense.created_at)
+      }));
+
+      const recentActivity = [...recentSales, ...recentExpenses]
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .slice(0, 3);
+
+      return {
+        totalSales,
+        totalExpenses,
+        netProfit,
+        activeItems,
+        recentActivity
+      };
     },
-    {
-      title: "Total Expenses",
-      value: "₹8,450",
-      description: "This month",
-      icon: DollarSign,
-      color: "text-red-600"
-    },
-    {
-      title: "Active Items",
-      value: "245",
-      description: "In inventory",
-      icon: Package,
-      color: "text-blue-600"
-    },
-    {
-      title: "Net Profit",
-      value: "₹6,790",
-      description: "This month",
-      icon: FileText,
-      color: "text-purple-600"
-    }
-  ];
+    enabled: !!user?.id
+  });
 
   const quickActions = [
     {
@@ -68,6 +90,61 @@ const Dashboard = () => {
       icon: FileText,
       action: () => navigate('/reports'),
       color: "bg-purple-50 hover:bg-purple-100 border-purple-200"
+    }
+  ];
+
+  const getTimeAgo = (date: Date) => {
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return 'Less than an hour ago';
+    if (diffInHours < 24) return `${diffInHours} hours ago`;
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays === 1) return '1 day ago';
+    return `${diffInDays} days ago`;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const statsCards = [
+    {
+      title: "Total Sales",
+      value: `₹${dashboardData?.totalSales.toLocaleString() || 0}`,
+      description: "All time",
+      icon: TrendingUp,
+      color: "text-green-600"
+    },
+    {
+      title: "Total Expenses",
+      value: `₹${dashboardData?.totalExpenses.toLocaleString() || 0}`,
+      description: "All time",
+      icon: DollarSign,
+      color: "text-red-600"
+    },
+    {
+      title: "Active Items",
+      value: dashboardData?.activeItems.toString() || "0",
+      description: "In inventory",
+      icon: Package,
+      color: "text-blue-600"
+    },
+    {
+      title: "Net Profit",
+      value: `₹${dashboardData?.netProfit.toLocaleString() || 0}`,
+      description: "All time",
+      icon: FileText,
+      color: dashboardData?.netProfit >= 0 ? "text-green-600" : "text-red-600"
     }
   ];
 
@@ -128,36 +205,34 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <ShoppingCart className="h-5 w-5 text-green-600" />
-                  <div>
-                    <p className="font-medium text-gray-900">Sale to John Doe</p>
-                    <p className="text-sm text-gray-600">2 hours ago</p>
+              {dashboardData?.recentActivity && dashboardData.recentActivity.length > 0 ? (
+                dashboardData.recentActivity.map((activity, index) => (
+                  <div key={index} className={`flex items-center justify-between p-3 rounded-lg ${
+                    activity.type === 'sale' ? 'bg-green-50' : 'bg-red-50'
+                  }`}>
+                    <div className="flex items-center space-x-3">
+                      {activity.type === 'sale' ? (
+                        <ShoppingCart className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <Receipt className="h-5 w-5 text-red-600" />
+                      )}
+                      <div>
+                        <p className="font-medium text-gray-900">{activity.description}</p>
+                        <p className="text-sm text-gray-600">{getTimeAgo(activity.date)}</p>
+                      </div>
+                    </div>
+                    <span className={`font-semibold ${
+                      activity.type === 'sale' ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {activity.type === 'sale' ? '+' : '-'}₹{activity.amount.toLocaleString()}
+                    </span>
                   </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No recent activity. Start by adding inventory items or recording transactions!</p>
                 </div>
-                <span className="font-semibold text-green-600">+₹1,250</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <Receipt className="h-5 w-5 text-red-600" />
-                  <div>
-                    <p className="font-medium text-gray-900">Office Rent</p>
-                    <p className="text-sm text-gray-600">1 day ago</p>
-                  </div>
-                </div>
-                <span className="font-semibold text-red-600">-₹5,000</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <Package className="h-5 w-5 text-blue-600" />
-                  <div>
-                    <p className="font-medium text-gray-900">Inventory Updated</p>
-                    <p className="text-sm text-gray-600">2 days ago</p>
-                  </div>
-                </div>
-                <span className="font-semibold text-blue-600">+50 items</span>
-              </div>
+              )}
             </div>
           </CardContent>
         </Card>

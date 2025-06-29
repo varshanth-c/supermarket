@@ -11,48 +11,137 @@ import { format } from 'date-fns';
 import { Navbar } from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
 
 const Reports = () => {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [selectedMonth, setSelectedMonth] = useState<Date | undefined>(new Date());
   const [reportType, setReportType] = useState('monthly');
 
-  // Mock data - replace with Supabase integration
-  const salesData = [
-    { month: 'Jan', sales: 12000, expenses: 8000, profit: 4000 },
-    { month: 'Feb', sales: 15000, expenses: 9000, profit: 6000 },
-    { month: 'Mar', sales: 18000, expenses: 10000, profit: 8000 },
-    { month: 'Apr', sales: 16000, expenses: 11000, profit: 5000 },
-    { month: 'May', sales: 20000, expenses: 12000, profit: 8000 },
-    { month: 'Jun', sales: 22000, expenses: 13000, profit: 9000 }
-  ];
+  // Fetch reports data
+  const { data: reportsData, isLoading } = useQuery({
+    queryKey: ['reports', user?.id, selectedMonth],
+    queryFn: async () => {
+      const [salesRes, expensesRes, inventoryRes] = await Promise.all([
+        supabase.from('sales').select('*').eq('user_id', user!.id),
+        supabase.from('expenses').select('*').eq('user_id', user!.id),
+        supabase.from('inventory').select('*').eq('user_id', user!.id)
+      ]);
 
-  const categoryData = [
-    { name: 'Vegetables', value: 45, amount: 9900 },
-    { name: 'Toiletries', value: 25, amount: 5500 },
-    { name: 'Others', value: 20, amount: 4400 },
-    { name: 'Snacks', value: 10, amount: 2200 }
-  ];
+      const sales = salesRes.data || [];
+      const expenses = expensesRes.data || [];
+      const inventory = inventoryRes.data || [];
 
-  const expenseBreakdown = [
-    { category: 'Rent', amount: 5000 },
-    { category: 'Inventory', amount: 8000 },
-    { category: 'Transport', amount: 2000 },
-    { category: 'Utilities', amount: 1500 },
-    { category: 'Marketing', amount: 1000 }
-  ];
+      // Calculate monthly data for last 6 months
+      const monthlyData = [];
+      const now = new Date();
+      
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const monthSales = sales.filter(sale => {
+          const saleDate = new Date(sale.created_at!);
+          return saleDate.getMonth() === date.getMonth() && saleDate.getFullYear() === date.getFullYear();
+        });
+        
+        const monthExpenses = expenses.filter(expense => {
+          const expenseDate = new Date(expense.date);
+          return expenseDate.getMonth() === date.getMonth() && expenseDate.getFullYear() === date.getFullYear();
+        });
+
+        const salesTotal = monthSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0);
+        const expensesTotal = monthExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+
+        monthlyData.push({
+          month: format(date, 'MMM'),
+          sales: salesTotal,
+          expenses: expensesTotal,
+          profit: salesTotal - expensesTotal
+        });
+      }
+
+      // Category analysis for sales
+      const categoryStats: { [key: string]: { value: number; amount: number } } = {};
+      let totalSalesAmount = 0;
+      
+      sales.forEach(sale => {
+        const items = Array.isArray(sale.items) ? sale.items : [];
+        items.forEach((item: any) => {
+          const category = item.category || 'Others';
+          const amount = Number(item.quantity) * Number(item.unit_price);
+          
+          if (!categoryStats[category]) {
+            categoryStats[category] = { value: 0, amount: 0 };
+          }
+          categoryStats[category].amount += amount;
+          totalSalesAmount += amount;
+        });
+      });
+
+      // Convert to percentage
+      const categoryData = Object.entries(categoryStats).map(([name, data]) => ({
+        name,
+        value: Math.round((data.amount / totalSalesAmount) * 100) || 0,
+        amount: data.amount
+      }));
+
+      // Expense breakdown
+      const expenseBreakdown: { [key: string]: number } = {};
+      expenses.forEach(expense => {
+        const category = expense.category;
+        expenseBreakdown[category] = (expenseBreakdown[category] || 0) + Number(expense.amount);
+      });
+
+      const expenseBreakdownArray = Object.entries(expenseBreakdown).map(([category, amount]) => ({
+        category,
+        amount
+      }));
+
+      // Current month data
+      const currentMonth = selectedMonth || new Date();
+      const currentMonthSales = sales.filter(sale => {
+        const saleDate = new Date(sale.created_at!);
+        return saleDate.getMonth() === currentMonth.getMonth() && 
+               saleDate.getFullYear() === currentMonth.getFullYear();
+      });
+
+      const currentMonthExpenses = expenses.filter(expense => {
+        const expenseDate = new Date(expense.date);
+        return expenseDate.getMonth() === currentMonth.getMonth() && 
+               expenseDate.getFullYear() === currentMonth.getFullYear();
+      });
+
+      const totalSales = currentMonthSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0);
+      const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+      const netProfit = totalSales - totalExpenses;
+      const profitMargin = totalSales > 0 ? ((netProfit / totalSales) * 100) : 0;
+
+      // Get top selling category
+      const topCategory = categoryData.length > 0 
+        ? categoryData.reduce((prev, current) => (prev.amount > current.amount) ? prev : current)
+        : null;
+
+      return {
+        monthlyData,
+        categoryData,
+        expenseBreakdown: expenseBreakdownArray,
+        currentMonthData: {
+          totalSales,
+          totalExpenses,
+          netProfit,
+          profitMargin,
+          growthRate: 0, // Could calculate from previous month
+          topSellingCategory: topCategory?.name || 'N/A',
+          transactionCount: currentMonthSales.length
+        }
+      };
+    },
+    enabled: !!user?.id
+  });
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
-
-  const currentMonthData = {
-    totalSales: 22000,
-    totalExpenses: 13000,
-    netProfit: 9000,
-    profitMargin: 40.9,
-    growthRate: 10.5,
-    topSellingCategory: 'Vegetables',
-    transactionCount: 156
-  };
 
   const generateReport = () => {
     toast({
@@ -74,6 +163,21 @@ const Reports = () => {
       description: "Report sent via email"
     });
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { monthlyData = [], categoryData = [], expenseBreakdown = [], currentMonthData } = reportsData || {};
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -146,12 +250,11 @@ const Reports = () => {
               <TrendingUp className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">₹{currentMonthData.totalSales.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-gray-900">₹{currentMonthData?.totalSales?.toLocaleString() || 0}</div>
               <div className="flex items-center mt-1">
                 <Badge className="bg-green-100 text-green-800">
-                  +{currentMonthData.growthRate}%
+                  Current Period
                 </Badge>
-                <span className="text-xs text-gray-500 ml-2">vs last month</span>
               </div>
             </CardContent>
           </Card>
@@ -162,8 +265,8 @@ const Reports = () => {
               <TrendingDown className="h-4 w-4 text-red-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">₹{currentMonthData.totalExpenses.toLocaleString()}</div>
-              <p className="text-xs text-gray-500 mt-1">Monthly expenses</p>
+              <div className="text-2xl font-bold text-gray-900">₹{currentMonthData?.totalExpenses?.toLocaleString() || 0}</div>
+              <p className="text-xs text-gray-500 mt-1">Current period</p>
             </CardContent>
           </Card>
 
@@ -173,10 +276,10 @@ const Reports = () => {
               <BarChart3 className="h-4 w-4 text-blue-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">₹{currentMonthData.netProfit.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-gray-900">₹{currentMonthData?.netProfit?.toLocaleString() || 0}</div>
               <div className="flex items-center mt-1">
                 <Badge className="bg-blue-100 text-blue-800">
-                  {currentMonthData.profitMargin}% margin
+                  {currentMonthData?.profitMargin?.toFixed(1) || 0}% margin
                 </Badge>
               </div>
             </CardContent>
@@ -188,8 +291,8 @@ const Reports = () => {
               <FileText className="h-4 w-4 text-purple-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">{currentMonthData.transactionCount}</div>
-              <p className="text-xs text-gray-500 mt-1">This month</p>
+              <div className="text-2xl font-bold text-gray-900">{currentMonthData?.transactionCount || 0}</div>
+              <p className="text-xs text-gray-500 mt-1">This period</p>
             </CardContent>
           </Card>
         </div>
@@ -203,11 +306,11 @@ const Reports = () => {
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={salesData}>
+                <BarChart data={monthlyData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis />
-                  <Tooltip formatter={(value) => [`₹${value.toLocaleString()}`, '']} />
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString()}`, '']} />
                   <Bar dataKey="sales" fill="#22c55e" name="Sales" />
                   <Bar dataKey="expenses" fill="#ef4444" name="Expenses" />
                 </BarChart>
@@ -223,11 +326,11 @@ const Reports = () => {
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={salesData}>
+                <LineChart data={monthlyData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis />
-                  <Tooltip formatter={(value) => [`₹${value.toLocaleString()}`, 'Profit']} />
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString()}`, 'Profit']} />
                   <Line type="monotone" dataKey="profit" stroke="#3b82f6" strokeWidth={3} />
                 </LineChart>
               </ResponsiveContainer>
@@ -243,25 +346,31 @@ const Reports = () => {
               <CardDescription>Revenue distribution across product categories</CardDescription>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, value }) => `${name}: ${value}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => [`${value}%`, 'Share']} />
-                </PieChart>
-              </ResponsiveContainer>
+              {categoryData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={categoryData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, value }) => `${name}: ${value}%`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {categoryData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => [`${value}%`, 'Share']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[300px] text-gray-500">
+                  No sales data available
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -269,22 +378,26 @@ const Reports = () => {
           <Card>
             <CardHeader>
               <CardTitle>Expense Breakdown</CardTitle>
-              <CardDescription>Monthly expense categories</CardDescription>
+              <CardDescription>Current period expense categories</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {expenseBreakdown.map((expense, index) => (
-                  <div key={expense.category} className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div 
-                        className="w-4 h-4 rounded-full" 
-                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                      />
-                      <span className="font-medium">{expense.category}</span>
+                {expenseBreakdown.length > 0 ? (
+                  expenseBreakdown.map((expense, index) => (
+                    <div key={expense.category} className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div 
+                          className="w-4 h-4 rounded-full" 
+                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                        />
+                        <span className="font-medium">{expense.category}</span>
+                      </div>
+                      <span className="font-semibold">₹{expense.amount.toLocaleString()}</span>
                     </div>
-                    <span className="font-semibold">₹{expense.amount.toLocaleString()}</span>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <div className="text-center text-gray-500">No expense data available</div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -293,7 +406,7 @@ const Reports = () => {
         {/* Detailed Summary */}
         <Card>
           <CardHeader>
-            <CardTitle>Monthly Summary Report</CardTitle>
+            <CardTitle>Period Summary Report</CardTitle>
             <CardDescription>
               Comprehensive business overview for {selectedMonth ? format(selectedMonth, "MMMM yyyy") : "current period"}
             </CardDescription>
@@ -305,19 +418,21 @@ const Reports = () => {
                 <div className="space-y-3">
                   <div className="flex justify-between">
                     <span>Gross Sales:</span>
-                    <span className="font-semibold">₹{currentMonthData.totalSales.toLocaleString()}</span>
+                    <span className="font-semibold">₹{currentMonthData?.totalSales?.toLocaleString() || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Total Expenses:</span>
-                    <span className="font-semibold">₹{currentMonthData.totalExpenses.toLocaleString()}</span>
+                    <span className="font-semibold">₹{currentMonthData?.totalExpenses?.toLocaleString() || 0}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span>Net Profit:</span>
-                    <span className="font-semibold text-green-600">₹{currentMonthData.netProfit.toLocaleString()}</span>
+                    <span className={`font-semibold ${(currentMonthData?.netProfit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      ₹{currentMonthData?.netProfit?.toLocaleString() || 0}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Profit Margin:</span>
-                    <span className="font-semibold">{currentMonthData.profitMargin}%</span>
+                    <span className="font-semibold">{currentMonthData?.profitMargin?.toFixed(1) || 0}%</span>
                   </div>
                 </div>
               </div>
@@ -325,33 +440,23 @@ const Reports = () => {
                 <h3 className="text-lg font-semibold mb-4">Key Insights</h3>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span>Growth Rate:</span>
-                    <Badge className="bg-green-100 text-green-800">+{currentMonthData.growthRate}%</Badge>
-                  </div>
-                  <div className="flex justify-between">
                     <span>Top Category:</span>
-                    <span className="font-semibold">{currentMonthData.topSellingCategory}</span>
+                    <span className="font-semibold">{currentMonthData?.topSellingCategory || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Total Transactions:</span>
-                    <span className="font-semibold">{currentMonthData.transactionCount}</span>
+                    <span className="font-semibold">{currentMonthData?.transactionCount || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Avg. Transaction:</span>
-                    <span className="font-semibold">₹{Math.round(currentMonthData.totalSales / currentMonthData.transactionCount)}</span>
+                    <span className="font-semibold">
+                      ₹{currentMonthData?.transactionCount > 0 
+                        ? Math.round((currentMonthData?.totalSales || 0) / currentMonthData.transactionCount).toLocaleString()
+                        : 0}
+                    </span>
                   </div>
                 </div>
               </div>
-            </div>
-            
-            <div className="mt-8 p-4 bg-blue-50 rounded-lg">
-              <h4 className="font-semibold text-blue-900 mb-2">Recommendations</h4>
-              <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Continue focusing on {currentMonthData.topSellingCategory} as it's your top revenue generator</li>
-                <li>• Consider optimizing expenses to improve profit margin beyond {currentMonthData.profitMargin}%</li>
-                <li>• Your growth rate of {currentMonthData.growthRate}% is positive - maintain current strategies</li>
-                <li>• Monitor inventory levels for popular categories to avoid stockouts</li>
-              </ul>
             </div>
           </CardContent>
         </Card>

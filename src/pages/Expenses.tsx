@@ -15,48 +15,23 @@ import { Plus, Receipt, Calendar as CalendarIcon, Filter, TrendingDown } from 'l
 import { format } from 'date-fns';
 import { Navbar } from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 interface Expense {
   id: string;
   amount: number;
   category: string;
   description: string;
-  spent_at: Date;
+  date: string;
+  expense_date: string;
 }
 
 const Expenses = () => {
   const { toast } = useToast();
-  const [expenses, setExpenses] = useState<Expense[]>([
-    {
-      id: '1',
-      amount: 5000,
-      category: 'Rent',
-      description: 'Office rent for this month',
-      spent_at: new Date('2024-06-15')
-    },
-    {
-      id: '2',
-      amount: 1200,
-      category: 'Transport',
-      description: 'Fuel and transportation costs',
-      spent_at: new Date('2024-06-20')
-    },
-    {
-      id: '3',
-      amount: 800,
-      category: 'Utilities',
-      description: 'Electricity bill',
-      spent_at: new Date('2024-06-18')
-    },
-    {
-      id: '4',
-      amount: 2500,
-      category: 'Inventory',
-      description: 'Stock purchase from wholesaler',
-      spent_at: new Date('2024-06-22')
-    }
-  ]);
-
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState<Date | undefined>(new Date());
@@ -64,10 +39,64 @@ const Expenses = () => {
     amount: 0,
     category: '',
     description: '',
-    spent_at: new Date()
+    date: new Date().toISOString().split('T')[0],
+    expense_date: new Date().toISOString().split('T')[0]
   });
 
   const categories = ['Rent', 'Transport', 'Utilities', 'Inventory', 'Marketing', 'Maintenance', 'Miscellaneous'];
+
+  // Fetch expenses
+  const { data: expenses = [], isLoading } = useQuery({
+    queryKey: ['expenses', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id
+  });
+
+  // Add expense mutation
+  const addExpenseMutation = useMutation({
+    mutationFn: async (expense: typeof newExpense) => {
+      const { data, error } = await supabase
+        .from('expenses')
+        .insert([{ ...expense, user_id: user!.id }])
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      setNewExpense({
+        amount: 0,
+        category: '',
+        description: '',
+        date: new Date().toISOString().split('T')[0],
+        expense_date: new Date().toISOString().split('T')[0]
+      });
+      setIsAddDialogOpen(false);
+      toast({
+        title: "Success",
+        description: "Expense added successfully"
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to add expense",
+        variant: "destructive"
+      });
+      console.error('Add expense error:', error);
+    }
+  });
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
@@ -84,14 +113,15 @@ const Expenses = () => {
 
   const filteredExpenses = expenses.filter(expense => {
     const matchesCategory = selectedCategory === 'all' || expense.category === selectedCategory;
+    const expenseDate = new Date(expense.date);
     const matchesMonth = !selectedMonth || 
-      (expense.spent_at.getMonth() === selectedMonth.getMonth() && 
-       expense.spent_at.getFullYear() === selectedMonth.getFullYear());
+      (expenseDate.getMonth() === selectedMonth.getMonth() && 
+       expenseDate.getFullYear() === selectedMonth.getFullYear());
     return matchesCategory && matchesMonth;
   });
 
   const getTotalExpenses = () => {
-    return filteredExpenses.reduce((total, expense) => total + expense.amount, 0);
+    return filteredExpenses.reduce((total, expense) => total + Number(expense.amount), 0);
   };
 
   const handleAddExpense = () => {
@@ -103,34 +133,29 @@ const Expenses = () => {
       });
       return;
     }
-
-    const expense: Expense = {
-      id: Date.now().toString(),
-      ...newExpense
-    };
-
-    setExpenses([expense, ...expenses]);
-    setNewExpense({
-      amount: 0,
-      category: '',
-      description: '',
-      spent_at: new Date()
-    });
-    setIsAddDialogOpen(false);
-    
-    toast({
-      title: "Success",
-      description: "Expense added successfully"
-    });
+    addExpenseMutation.mutate(newExpense);
   };
 
   const getCategoryStats = () => {
     const stats: { [key: string]: number } = {};
     filteredExpenses.forEach(expense => {
-      stats[expense.category] = (stats[expense.category] || 0) + expense.amount;
+      stats[expense.category] = (stats[expense.category] || 0) + Number(expense.amount);
     });
     return Object.entries(stats).map(([category, amount]) => ({ category, amount }));
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -191,26 +216,21 @@ const Expenses = () => {
                 </div>
                 <div className="grid gap-2">
                   <Label>Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="justify-start text-left font-normal">
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {format(newExpense.spent_at, "PPP")}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={newExpense.spent_at}
-                        onSelect={(date) => date && setNewExpense({...newExpense, spent_at: date})}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <Input
+                    type="date"
+                    value={newExpense.date}
+                    onChange={(e) => setNewExpense({
+                      ...newExpense, 
+                      date: e.target.value,
+                      expense_date: e.target.value
+                    })}
+                  />
                 </div>
               </div>
               <DialogFooter>
-                <Button onClick={handleAddExpense}>Add Expense</Button>
+                <Button onClick={handleAddExpense} disabled={addExpenseMutation.isPending}>
+                  {addExpenseMutation.isPending ? 'Adding...' : 'Add Expense'}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -342,7 +362,7 @@ const Expenses = () => {
                 <TableBody>
                   {filteredExpenses.map((expense) => (
                     <TableRow key={expense.id}>
-                      <TableCell>{format(expense.spent_at, "MMM dd, yyyy")}</TableCell>
+                      <TableCell>{format(new Date(expense.date), "MMM dd, yyyy")}</TableCell>
                       <TableCell>
                         <Badge className={getCategoryColor(expense.category)}>
                           {expense.category}
@@ -350,7 +370,7 @@ const Expenses = () => {
                       </TableCell>
                       <TableCell>{expense.description}</TableCell>
                       <TableCell className="font-semibold text-red-600">
-                        ₹{expense.amount.toLocaleString()}
+                        ₹{Number(expense.amount).toLocaleString()}
                       </TableCell>
                     </TableRow>
                   ))}
