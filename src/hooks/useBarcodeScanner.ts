@@ -41,7 +41,7 @@ export const useBarcodeScanner = () => {
           requestAnimationFrame(scanFrame);
         };
         
-        video.addEventListener('loadedmetadata', () => {
+        videoRef.current.addEventListener('loadedmetadata', () => {
           scanFrame();
         });
       }

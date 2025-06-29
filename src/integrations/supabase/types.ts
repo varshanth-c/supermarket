@@ -50,6 +50,7 @@ export type Database = {
       }
       inventory: {
         Row: {
+          barcode: string | null
           category: string
           created_at: string | null
           id: string
@@ -62,6 +63,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          barcode?: string | null
           category: string
           created_at?: string | null
           id?: string
@@ -74,6 +76,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          barcode?: string | null
           category?: string
           created_at?: string | null
           id?: string

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import QRCode from 'qrcode.react';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface InventoryItem {
   id: string;
@@ -23,7 +22,7 @@ interface InventoryItem {
   category: string;
   quantity: number;
   unit_price: number;
-  barcode?: string;
+  barcode?: string | null;
 }
 
 interface CartItem extends InventoryItem {
@@ -799,7 +798,7 @@ const Sales = () => {
                 </div>
 
                 <div className="mt-6 text-center">
-                  <QRCode 
+                  <QRCodeSVG
                     value={JSON.stringify({
                       billId,
                       amount: getTotalAmount(),
