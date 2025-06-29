@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,13 +9,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Plus, ShoppingCart, Trash2, QrCode, Download, Send, Camera, Pause, Play, RotateCcw, Printer, Save } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Plus, ShoppingCart, Trash2, Camera, Download, Send, Printer, Save, Edit, Check, RotateCcw } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
+import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
 
 interface InventoryItem {
   id: string;
@@ -23,17 +26,23 @@ interface InventoryItem {
   quantity: number;
   unit_price: number;
   barcode?: string | null;
+  gst_rate?: number;
+  hsn_code?: string;
 }
 
 interface CartItem extends InventoryItem {
   cart_quantity: number;
   total_price: number;
+  gst_amount: number;
+  final_amount: number;
 }
 
 interface Customer {
   name: string;
   phone: string;
   email: string;
+  address: string;
+  gstin?: string;
 }
 
 interface Cart {
@@ -43,34 +52,57 @@ interface Cart {
   customer: Customer;
   isHeld: boolean;
   createdAt: Date;
+  notes: string;
+}
+
+interface CompanyInfo {
+  name: string;
+  address: string;
+  gstin: string;
+  phone: string;
+  email: string;
+  logo?: string;
 }
 
 const Sales = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { videoRef, canvasRef, startScanning, stopScanning } = useBarcodeScanner();
   
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedItem, setSelectedItem] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [showBillDialog, setShowBillDialog] = useState(false);
+  const [showEditBillDialog, setShowEditBillDialog] = useState(false);
+  const [showCompanyDialog, setShowCompanyDialog] = useState(false);
+  const [billId, setBillId] = useState('');
+  const [currentBill, setCurrentBill] = useState<any>(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  
   const [carts, setCarts] = useState<Cart[]>([
     {
       id: '1',
       name: 'Cart 1',
       items: [],
-      customer: { name: '', phone: '', email: '' },
+      customer: { name: '', phone: '', email: '', address: '', gstin: '' },
       isHeld: false,
-      createdAt: new Date()
+      createdAt: new Date(),
+      notes: ''
     }
   ]);
   const [activeCartId, setActiveCartId] = useState('1');
-  const [showBillDialog, setShowBillDialog] = useState(false);
-  const [billId, setBillId] = useState('');
-  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>({
+    name: 'Your Company Name',
+    address: 'Your Company Address',
+    gstin: 'Your GSTIN Number',
+    phone: 'Your Phone Number',
+    email: 'your@email.com',
+    logo: ''
+  });
 
   // Fetch inventory items from Supabase
   const { data: inventoryItems = [], isLoading } = useQuery({
@@ -105,41 +137,6 @@ const Sales = () => {
     };
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey) {
-        switch (e.key) {
-          case 'n':
-            e.preventDefault();
-            addNewCart();
-            break;
-          case 'h':
-            e.preventDefault();
-            holdCart();
-            break;
-          case 'r':
-            e.preventDefault();
-            resumeCart();
-            break;
-          case 'Enter':
-            e.preventDefault();
-            generateBill();
-            break;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCart]);
-
-  const filteredItems = selectedCategory 
-    ? inventoryItems.filter(item => item.category === selectedCategory)
-    : [];
-
-  const selectedItemData = inventoryItems.find(item => item.id === selectedItem);
-
   // Save sale mutation
   const saveSaleMutation = useMutation({
     mutationFn: async (saleData: any) => {
@@ -157,60 +154,51 @@ const Sales = () => {
     }
   });
 
+  // Update inventory mutation
+  const updateInventoryMutation = useMutation({
+    mutationFn: async (updates: any[]) => {
+      const promises = updates.map(({ id, quantity }) => 
+        supabase
+          .from('inventory')
+          .update({ quantity })
+          .eq('id', id)
+          .eq('user_id', user!.id)
+      );
+      
+      await Promise.all(promises);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    }
+  });
+
+  const filteredItems = selectedCategory 
+    ? inventoryItems.filter(item => item.category === selectedCategory)
+    : [];
+
+  const selectedItemData = inventoryItems.find(item => item.id === selectedItem);
+
+  const calculateGST = (price: number, gstRate: number) => {
+    const gstAmount = (price * gstRate) / 100;
+    return {
+      gstAmount,
+      finalAmount: price + gstAmount
+    };
+  };
+
   const addNewCart = () => {
     const newCartId = Date.now().toString();
     const newCart: Cart = {
       id: newCartId,
       name: `Cart ${carts.length + 1}`,
       items: [],
-      customer: { name: '', phone: '', email: '' },
+      customer: { name: '', phone: '', email: '', address: '', gstin: '' },
       isHeld: false,
-      createdAt: new Date()
+      createdAt: new Date(),
+      notes: ''
     };
     setCarts([...carts, newCart]);
     setActiveCartId(newCartId);
-  };
-
-  const holdCart = () => {
-    setCarts(carts.map(cart => 
-      cart.id === activeCartId 
-        ? { ...cart, isHeld: true }
-        : cart
-    ));
-    toast({
-      title: "Cart Held",
-      description: "Cart has been put on hold"
-    });
-  };
-
-  const resumeCart = () => {
-    setCarts(carts.map(cart => 
-      cart.id === activeCartId 
-        ? { ...cart, isHeld: false }
-        : cart
-    ));
-    toast({
-      title: "Cart Resumed",
-      description: "Cart is now active"
-    });
-  };
-
-  const removeCart = (cartId: string) => {
-    if (carts.length === 1) {
-      toast({
-        title: "Error",
-        description: "Cannot remove the last cart",
-        variant: "destructive"
-      });
-      return;
-    }
-    
-    const updatedCarts = carts.filter(cart => cart.id !== cartId);
-    setCarts(updatedCarts);
-    
-    if (activeCartId === cartId) {
-      setActiveCartId(updatedCarts[0].id);
-    }
   };
 
   const handleBarcodeInput = (barcode: string) => {
@@ -232,13 +220,10 @@ const Sales = () => {
     }
   };
 
-  const startBarcodeScanner = async () => {
+  const startBarcodeScanning = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setShowBarcodeScanner(true);
-      }
+      await startScanning(handleBarcodeInput);
+      setShowBarcodeScanner(true);
     } catch (error) {
       toast({
         title: "Camera Error",
@@ -267,16 +252,30 @@ const Sales = () => {
       return;
     }
 
+    const gstRate = (selectedItemData as any).gst_rate || 18;
+    const basePrice = quantity * selectedItemData.unit_price;
+    const { gstAmount, finalAmount } = calculateGST(basePrice, gstRate);
+
     const updatedCarts = carts.map(cart => {
       if (cart.id === activeCartId) {
         const existingItem = cart.items.find(item => item.id === selectedItemData.id);
         
         if (existingItem) {
+          const newQuantity = existingItem.cart_quantity + quantity;
+          const newBasePrice = newQuantity * selectedItemData.unit_price;
+          const { gstAmount: newGstAmount, finalAmount: newFinalAmount } = calculateGST(newBasePrice, gstRate);
+          
           return {
             ...cart,
             items: cart.items.map(item => 
               item.id === selectedItemData.id 
-                ? { ...item, cart_quantity: item.cart_quantity + quantity, total_price: (item.cart_quantity + quantity) * item.unit_price }
+                ? { 
+                    ...item, 
+                    cart_quantity: newQuantity, 
+                    total_price: newBasePrice,
+                    gst_amount: newGstAmount,
+                    final_amount: newFinalAmount
+                  }
                 : item
             )
           };
@@ -284,7 +283,10 @@ const Sales = () => {
           const cartItem: CartItem = {
             ...selectedItemData,
             cart_quantity: quantity,
-            total_price: quantity * selectedItemData.unit_price
+            total_price: basePrice,
+            gst_amount: gstAmount,
+            final_amount: finalAmount,
+            gst_rate: gstRate
           };
           return {
             ...cart,
@@ -325,14 +327,25 @@ const Sales = () => {
     setCarts(updatedCarts);
   };
 
+  const updateCartNotes = (notes: string) => {
+    const updatedCarts = carts.map(cart => 
+      cart.id === activeCartId 
+        ? { ...cart, notes }
+        : cart
+    );
+    setCarts(updatedCarts);
+  };
+
   const getTotalAmount = () => {
     return activeCart.items.reduce((total, item) => total + item.total_price, 0);
   };
 
-  const saveToOfflineStorage = (saleData: any) => {
-    const offlineSales = JSON.parse(localStorage.getItem('offlineSales') || '[]');
-    offlineSales.push({ ...saleData, offline: true, timestamp: Date.now() });
-    localStorage.setItem('offlineSales', JSON.stringify(offlineSales));
+  const getTotalGST = () => {
+    return activeCart.items.reduce((total, item) => total + item.gst_amount, 0);
+  };
+
+  const getFinalAmount = () => {
+    return activeCart.items.reduce((total, item) => total + item.final_amount, 0);
   };
 
   const generateBill = async () => {
@@ -354,99 +367,161 @@ const Sales = () => {
       return;
     }
 
-    const newBillId = `BILL-${Date.now()}`;
+    const newBillId = `INV-${Date.now()}`;
     setBillId(newBillId);
     
-    const saleData = {
-      user_id: user!.id,
+    const billData = {
+      billId: newBillId,
       items: activeCart.items,
-      total_amount: getTotalAmount(),
-      customer_name: activeCart.customer.name,
-      customer_phone: activeCart.customer.phone,
-      customer_email: activeCart.customer.email
+      customer: activeCart.customer,
+      subtotal: getTotalAmount(),
+      totalGST: getTotalGST(),
+      finalAmount: getFinalAmount(),
+      notes: activeCart.notes,
+      timestamp: new Date(),
+      companyInfo
     };
-
-    if (isOffline) {
-      saveToOfflineStorage(saleData);
-      toast({
-        title: "Offline Sale",
-        description: "Sale saved offline. Will sync when online."
-      });
-    } else {
-      try {
-        await saveSaleMutation.mutateAsync(saleData);
-        toast({
-          title: "Success",
-          description: "Bill generated successfully"
-        });
-      } catch (error) {
-        saveToOfflineStorage(saleData);
-        toast({
-          title: "Saved Offline",
-          description: "Sale saved offline due to connection issue"
-        });
-      }
-    }
-
+    
+    setCurrentBill(billData);
     setShowBillDialog(true);
   };
 
-  const downloadBill = () => {
-    // Generate PDF functionality would go here
+  const editBill = () => {
+    setShowBillDialog(false);
+    setShowEditBillDialog(true);
+  };
+
+  const saveUpdatedBill = () => {
+    // Recalculate totals and update current bill
+    const updatedBillData = {
+      ...currentBill,
+      items: activeCart.items,
+      customer: activeCart.customer,
+      subtotal: getTotalAmount(),
+      totalGST: getTotalGST(),
+      finalAmount: getFinalAmount(),
+      notes: activeCart.notes
+    };
+    
+    setCurrentBill(updatedBillData);
+    setShowEditBillDialog(false);
+    setShowBillDialog(true);
+    
     toast({
       title: "Success",
-      description: "Bill downloaded successfully"
+      description: "Bill updated successfully"
     });
   };
 
-  const sendBill = () => {
-    // Send bill via email/SMS/WhatsApp functionality would go here
-    toast({
-      title: "Success",
-      description: "Bill sent successfully"
-    });
+  const completeSale = async () => {
+    try {
+      const saleData = {
+        user_id: user!.id,
+        items: activeCart.items,
+        total_amount: getFinalAmount(),
+        customer_name: activeCart.customer.name,
+        customer_phone: activeCart.customer.phone,
+        customer_email: activeCart.customer.email,
+        bill_data: currentBill
+      };
+
+      // Update inventory quantities
+      const inventoryUpdates = activeCart.items.map(item => ({
+        id: item.id,
+        quantity: item.quantity - item.cart_quantity
+      }));
+
+      await Promise.all([
+        saveSaleMutation.mutateAsync(saleData),
+        updateInventoryMutation.mutateAsync(inventoryUpdates)
+      ]);
+
+      // Clear the active cart and reset
+      const updatedCarts = carts.map(cart => 
+        cart.id === activeCartId 
+          ? { 
+              ...cart, 
+              items: [], 
+              customer: { name: '', phone: '', email: '', address: '', gstin: '' }, 
+              isHeld: false,
+              notes: ''
+            }
+          : cart
+      );
+      setCarts(updatedCarts);
+      setShowBillDialog(false);
+      setCurrentBill(null);
+      setBillId('');
+      
+      toast({
+        title: "Success",
+        description: "Transaction completed successfully!"
+      });
+
+      // Auto-refresh for new transaction
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to complete transaction",
+        variant: "destructive"
+      });
+    }
   };
 
   const printThermalReceipt = () => {
-    // Thermal receipt printing would go here
+    if (!currentBill) return;
+    
     const printContent = `
-      VendorFlow Receipt
-      Bill ID: ${billId}
-      Date: ${new Date().toLocaleDateString()}
+      ${companyInfo.name}
+      ${companyInfo.address}
+      GSTIN: ${companyInfo.gstin}
+      Phone: ${companyInfo.phone}
+      Email: ${companyInfo.email}
       
-      Customer: ${activeCart.customer.name}
-      Phone: ${activeCart.customer.phone}
+      ================================
+      INVOICE: ${currentBill.billId}
+      Date: ${new Date().toLocaleDateString('en-IN')}
+      Time: ${new Date().toLocaleTimeString('en-IN')}
+      ================================
       
-      Items:
-      ${activeCart.items.map(item => 
-        `${item.item_name} x${item.cart_quantity} = ₹${item.total_price}`
+      Customer: ${currentBill.customer.name}
+      Phone: ${currentBill.customer.phone}
+      ${currentBill.customer.gstin ? `GSTIN: ${currentBill.customer.gstin}` : ''}
+      
+      ================================
+      ITEMS:
+      ================================
+      ${currentBill.items.map((item: CartItem) => 
+        `${item.item_name}
+HSN: ${(item as any).hsn_code || 'N/A'}
+Qty: ${item.cart_quantity} x ₹${item.unit_price}
+GST ${item.gst_rate}%: ₹${item.gst_amount.toFixed(2)}
+Total: ₹${item.final_amount.toFixed(2)}
+--------------------------------`
       ).join('\n')}
       
-      Total: ₹${getTotalAmount()}
+      ================================
+      Subtotal: ₹${currentBill.subtotal.toFixed(2)}
+      GST Total: ₹${currentBill.totalGST.toFixed(2)}
+      FINAL AMOUNT: ₹${currentBill.finalAmount.toFixed(2)}
+      ================================
+      
+      ${currentBill.notes ? `Notes: ${currentBill.notes}` : ''}
+      
+      Thank you for your business!
+      ================================
     `;
     
     const printWindow = window.open('', '_blank');
     if (printWindow) {
-      printWindow.document.write(`<pre style="font-family: monospace; font-size: 12px;">${printContent}</pre>`);
+      printWindow.document.write(`<pre style="font-family: monospace; font-size: 12px; white-space: pre-wrap;">${printContent}</pre>`);
       printWindow.document.close();
       printWindow.print();
     }
-  };
-
-  const completeSale = () => {
-    // Clear the active cart
-    const updatedCarts = carts.map(cart => 
-      cart.id === activeCartId 
-        ? { ...cart, items: [], customer: { name: '', phone: '', email: '' }, isHeld: false }
-        : cart
-    );
-    setCarts(updatedCarts);
-    setShowBillDialog(false);
-    
-    toast({
-      title: "Success",
-      description: "Sale completed successfully"
-    });
   };
 
   if (isLoading) {
@@ -468,8 +543,8 @@ const Sales = () => {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Advanced POS System</h1>
-            <p className="text-gray-600">Multi-cart billing with offline support</p>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">GST Compliant POS System</h1>
+            <p className="text-gray-600">Complete transaction management with barcode scanning</p>
             {isOffline && (
               <Badge variant="destructive" className="mt-2">
                 Offline Mode - Sales will sync when online
@@ -478,11 +553,15 @@ const Sales = () => {
           </div>
           
           <div className="flex gap-2">
+            <Button onClick={() => setShowCompanyDialog(true)} variant="outline">
+              <Edit className="h-4 w-4 mr-2" />
+              Company Info
+            </Button>
             <Button onClick={addNewCart} variant="outline">
               <Plus className="h-4 w-4 mr-2" />
-              New Cart (Ctrl+N)
+              New Cart
             </Button>
-            <Button onClick={startBarcodeScanner} variant="outline">
+            <Button onClick={startBarcodeScanning} variant="outline">
               <Camera className="h-4 w-4 mr-2" />
               Scan Barcode
             </Button>
@@ -495,20 +574,8 @@ const Sales = () => {
             {carts.map((cart) => (
               <TabsTrigger key={cart.id} value={cart.id} className="relative">
                 <div className="flex items-center space-x-2">
-                  {cart.isHeld && <Pause className="h-3 w-3" />}
                   <span>{cart.name}</span>
                   <Badge variant="secondary">{cart.items.length}</Badge>
-                  {carts.length > 1 && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeCart(cart.id);
-                      }}
-                      className="ml-2 text-red-500 hover:text-red-700"
-                    >
-                      ×
-                    </button>
-                  )}
                 </div>
               </TabsTrigger>
             ))}
@@ -521,7 +588,7 @@ const Sales = () => {
             <Card className="mb-6">
               <CardHeader>
                 <CardTitle>Add Items to Cart</CardTitle>
-                <CardDescription>Select category and items or scan barcode</CardDescription>
+                <CardDescription>Select items or scan barcode</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Barcode Input */}
@@ -596,24 +663,10 @@ const Sales = () => {
             {/* Cart */}
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center space-x-2">
-                    <ShoppingCart className="h-5 w-5" />
-                    <span>{activeCart.name} ({activeCart.items.length} items)</span>
-                    {activeCart.isHeld && <Badge variant="outline">On Hold</Badge>}
-                  </CardTitle>
-                  
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={activeCart.isHeld ? resumeCart : holdCart}
-                    >
-                      {activeCart.isHeld ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                      {activeCart.isHeld ? 'Resume (Ctrl+R)' : 'Hold (Ctrl+H)'}
-                    </Button>
-                  </div>
-                </div>
+                <CardTitle className="flex items-center space-x-2">
+                  <ShoppingCart className="h-5 w-5" />
+                  <span>{activeCart.name} ({activeCart.items.length} items)</span>
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 {activeCart.items.length === 0 ? (
@@ -624,9 +677,11 @@ const Sales = () => {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Item</TableHead>
-                          <TableHead>Category</TableHead>
-                          <TableHead>Quantity</TableHead>
-                          <TableHead>Unit Price</TableHead>
+                          <TableHead>HSN</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead>GST%</TableHead>
+                          <TableHead>GST Amt</TableHead>
                           <TableHead>Total</TableHead>
                           <TableHead>Action</TableHead>
                         </TableRow>
@@ -635,10 +690,12 @@ const Sales = () => {
                         {activeCart.items.map((item) => (
                           <TableRow key={item.id}>
                             <TableCell className="font-medium">{item.item_name}</TableCell>
-                            <TableCell>{item.category}</TableCell>
+                            <TableCell>{(item as any).hsn_code || 'N/A'}</TableCell>
                             <TableCell>{item.cart_quantity}</TableCell>
                             <TableCell>₹{item.unit_price}</TableCell>
-                            <TableCell>₹{item.total_price}</TableCell>
+                            <TableCell>{item.gst_rate || 18}%</TableCell>
+                            <TableCell>₹{item.gst_amount.toFixed(2)}</TableCell>
+                            <TableCell>₹{item.final_amount.toFixed(2)}</TableCell>
                             <TableCell>
                               <Button
                                 size="sm"
@@ -652,10 +709,18 @@ const Sales = () => {
                         ))}
                       </TableBody>
                     </Table>
-                    <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-center text-lg font-semibold">
-                        <span>Total Amount:</span>
-                        <span>₹{getTotalAmount()}</span>
+                    <div className="mt-4 p-4 bg-gray-50 rounded-lg space-y-2">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>₹{getTotalAmount().toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Total GST:</span>
+                        <span>₹{getTotalGST().toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-lg font-semibold border-t pt-2">
+                        <span>Final Amount:</span>
+                        <span>₹{getFinalAmount().toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -690,13 +755,40 @@ const Sales = () => {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="customer-email">Email (Optional)</Label>
+                  <Label htmlFor="customer-email">Email</Label>
                   <Input
                     id="customer-email"
                     type="email"
                     value={activeCart.customer.email}
                     onChange={(e) => updateCustomer('email', e.target.value)}
                     placeholder="Email address"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="customer-address">Address</Label>
+                  <Textarea
+                    id="customer-address"
+                    value={activeCart.customer.address}
+                    onChange={(e) => updateCustomer('address', e.target.value)}
+                    placeholder="Customer address"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="customer-gstin">GSTIN (Optional)</Label>
+                  <Input
+                    id="customer-gstin"
+                    value={activeCart.customer.gstin}
+                    onChange={(e) => updateCustomer('gstin', e.target.value)}
+                    placeholder="GST identification number"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="transaction-notes">Transaction Notes</Label>
+                  <Textarea
+                    id="transaction-notes"
+                    value={activeCart.notes}
+                    onChange={(e) => updateCartNotes(e.target.value)}
+                    placeholder="Add any special notes for this transaction"
                   />
                 </div>
               </CardContent>
@@ -708,20 +800,27 @@ const Sales = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="p-4 bg-blue-50 rounded-lg">
-                    <div className="text-sm text-blue-600 mb-1">Total Amount</div>
-                    <div className="text-2xl font-bold text-blue-800">₹{getTotalAmount()}</div>
+                  <div className="p-4 bg-blue-50 rounded-lg space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Subtotal:</span>
+                      <span>₹{getTotalAmount().toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>GST:</span>
+                      <span>₹{getTotalGST().toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-lg font-bold text-blue-800 border-t pt-2">
+                      <span>Total Amount:</span>
+                      <span>₹{getFinalAmount().toFixed(2)}</span>
+                    </div>
                   </div>
                   <Button 
                     onClick={generateBill} 
                     className="w-full"
-                    disabled={activeCart.items.length === 0 || activeCart.isHeld}
+                    disabled={activeCart.items.length === 0}
                   >
-                    Generate Bill (Ctrl+Enter)
+                    Generate GST Invoice
                   </Button>
-                  <p className="text-xs text-gray-500 text-center">
-                    Keyboard shortcuts: Ctrl+N (New Cart), Ctrl+H (Hold), Ctrl+R (Resume)
-                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -739,93 +838,264 @@ const Sales = () => {
               <canvas ref={canvasRef} className="hidden" />
             </div>
             <DialogFooter>
-              <Button onClick={() => setShowBarcodeScanner(false)}>Close</Button>
+              <Button onClick={() => {
+                setShowBarcodeScanner(false);
+                stopScanning();
+              }}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Company Info Dialog */}
+        <Dialog open={showCompanyDialog} onOpenChange={setShowCompanyDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Company Information</DialogTitle>
+              <DialogDescription>Update your company details for invoices</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Company Name</Label>
+                <Input
+                  value={companyInfo.name}
+                  onChange={(e) => setCompanyInfo(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Address</Label>
+                <Textarea
+                  value={companyInfo.address}
+                  onChange={(e) => setCompanyInfo(prev => ({ ...prev, address: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>GSTIN</Label>
+                <Input
+                  value={companyInfo.gstin}
+                  onChange={(e) => setCompanyInfo(prev => ({ ...prev, gstin: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Phone</Label>
+                <Input
+                  value={companyInfo.phone}
+                  onChange={(e) => setCompanyInfo(prev => ({ ...prev, phone: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={companyInfo.email}
+                  onChange={(e) => setCompanyInfo(prev => ({ ...prev, email: e.target.value }))}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setShowCompanyDialog(false)}>Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Bill Dialog */}
         <Dialog open={showBillDialog} onOpenChange={setShowBillDialog}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Bill Generated</DialogTitle>
+              <DialogTitle>GST Invoice Generated</DialogTitle>
               <DialogDescription>
-                Bill ID: {billId}
+                Invoice ID: {billId}
               </DialogDescription>
             </DialogHeader>
             <div className="py-4">
-              <div className="border rounded-lg p-6 bg-white">
-                <div className="text-center mb-6">
-                  <h2 className="text-2xl font-bold">VendorFlow</h2>
-                  <p className="text-gray-600">Sales Invoice</p>
-                  <p className="text-sm text-gray-500">Bill ID: {billId}</p>
-                  <p className="text-sm text-gray-500">Date: {new Date().toLocaleDateString()}</p>
-                </div>
+              {currentBill && (
+                <div className="border rounded-lg p-6 bg-white">
+                  {/* Company Header */}
+                  <div className="text-center mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold">{companyInfo.name}</h2>
+                    <p className="text-gray-600">{companyInfo.address}</p>
+                    <p className="text-sm">GSTIN: {companyInfo.gstin} | Phone: {companyInfo.phone}</p>
+                    <p className="text-sm">Email: {companyInfo.email}</p>
+                  </div>
 
-                <div className="mb-6">
-                  <h3 className="font-semibold mb-2">Customer Details:</h3>
-                  <p>{activeCart.customer.name}</p>
-                  <p>{activeCart.customer.phone}</p>
-                  {activeCart.customer.email && <p>{activeCart.customer.email}</p>}
-                </div>
+                  {/* Invoice Details */}
+                  <div className="grid grid-cols-2 gap-6 mb-6">
+                    <div>
+                      <h3 className="font-semibold mb-2">Bill To:</h3>
+                      <p className="font-medium">{currentBill.customer.name}</p>
+                      <p>{currentBill.customer.phone}</p>
+                      {currentBill.customer.email && <p>{currentBill.customer.email}</p>}
+                      {currentBill.customer.address && <p>{currentBill.customer.address}</p>}
+                      {currentBill.customer.gstin && <p>GSTIN: {currentBill.customer.gstin}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p><strong>Invoice No:</strong> {currentBill.billId}</p>
+                      <p><strong>Date:</strong> {new Date().toLocaleDateString('en-IN')}</p>
+                      <p><strong>Time:</strong> {new Date().toLocaleTimeString('en-IN')}</p>
+                    </div>
+                  </div>
 
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Rate</TableHead>
-                      <TableHead>Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {activeCart.items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{item.item_name}</TableCell>
-                        <TableCell>{item.cart_quantity}</TableCell>
-                        <TableCell>₹{item.unit_price}</TableCell>
-                        <TableCell>₹{item.total_price}</TableCell>
+                  {/* Items Table */}
+                  <Table className="mb-6">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Sr.</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>HSN/SAC</TableHead>
+                        <TableHead>Qty</TableHead>
+                        <TableHead>Rate</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>GST%</TableHead>
+                        <TableHead>GST Amt</TableHead>
+                        <TableHead>Total</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {currentBill.items.map((item: CartItem, index: number) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>{item.item_name}</TableCell>
+                          <TableCell>{(item as any).hsn_code || 'N/A'}</TableCell>
+                          <TableCell>{item.cart_quantity}</TableCell>
+                          <TableCell>₹{item.unit_price}</TableCell>
+                          <TableCell>₹{item.total_price.toFixed(2)}</TableCell>
+                          <TableCell>{item.gst_rate}%</TableCell>
+                          <TableCell>₹{item.gst_amount.toFixed(2)}</TableCell>
+                          <TableCell>₹{item.final_amount.toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
 
-                <div className="mt-6 pt-4 border-t">
-                  <div className="flex justify-between text-lg font-semibold">
-                    <span>Total Amount:</span>
-                    <span>₹{getTotalAmount()}</span>
+                  {/* Totals */}
+                  <div className="flex justify-end">
+                    <div className="w-1/3 space-y-2">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>₹{currentBill.subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Total GST:</span>
+                        <span>₹{currentBill.totalGST.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-lg border-t pt-2">
+                        <span>Grand Total:</span>
+                        <span>₹{currentBill.finalAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  {currentBill.notes && (
+                    <div className="mt-6 pt-4 border-t">
+                      <p><strong>Notes:</strong> {currentBill.notes}</p>
+                    </div>
+                  )}
+
+                  {/* QR Code */}
+                  <div className="mt-6 text-center">
+                    <QRCodeSVG
+                      value={JSON.stringify({
+                        invoice: currentBill.billId,
+                        amount: currentBill.finalAmount,
+                        customer: currentBill.customer.name,
+                        date: new Date().toISOString()
+                      })}
+                      size={120}
+                    />
+                    <p className="text-sm text-gray-500 mt-2">QR Code for Invoice Verification</p>
                   </div>
                 </div>
-
-                <div className="mt-6 text-center">
-                  <QRCodeSVG
-                    value={JSON.stringify({
-                      billId,
-                      amount: getTotalAmount(),
-                      customer: activeCart.customer.name,
-                      items: activeCart.items.length
-                    })}
-                    size={120}
-                  />
-                  <p className="text-sm text-gray-500 mt-2">QR Code for Bill Details</p>
-                </div>
-              </div>
+              )}
             </div>
             <DialogFooter className="flex flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={downloadBill}>
-                <Download className="h-4 w-4 mr-2" />
-                Download PDF
-              </Button>
-              <Button variant="outline" onClick={sendBill}>
-                <Send className="h-4 w-4 mr-2" />
-                Send Bill
+              <Button variant="outline" onClick={editBill}>
+                <Edit className="h-4 w-4 mr-2" />
+                Edit Bill
               </Button>
               <Button variant="outline" onClick={printThermalReceipt}>
                 <Printer className="h-4 w-4 mr-2" />
                 Print Receipt
               </Button>
-              <Button onClick={completeSale}>
-                Complete Sale
+              <Button onClick={completeSale} className="bg-green-600 hover:bg-green-700">
+                <Check className="h-4 w-4 mr-2" />
+                Complete Transaction
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Bill Dialog */}
+        <Dialog open={showEditBillDialog} onOpenChange={setShowEditBillDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Invoice</DialogTitle>
+              <DialogDescription>Make changes to the current invoice</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Customer Name</Label>
+                <Input
+                  value={activeCart.customer.name}
+                  onChange={(e) => updateCustomer('name', e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Customer Phone</Label>
+                <Input
+                  value={activeCart.customer.phone}
+                  onChange={(e) => updateCustomer('phone', e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Transaction Notes</Label>
+                <Textarea
+                  value={activeCart.notes}
+                  onChange={(e) => updateCartNotes(e.target.value)}
+                />
+              </div>
+              
+              {/* Items in cart for editing */}
+              <div>
+                <Label>Items in Cart</Label>
+                <div className="max-h-60 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item</TableHead>
+                        <TableHead>Qty</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {activeCart.items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{item.item_name}</TableCell>
+                          <TableCell>{item.cart_quantity}</TableCell>
+                          <TableCell>₹{item.final_amount.toFixed(2)}</TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => removeFromCart(item.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowEditBillDialog(false)}>
+                Cancel
+              </Button>
+              <Button onClick={saveUpdatedBill}>
+                <Save className="h-4 w-4 mr-2" />
+                Save Changes
               </Button>
             </DialogFooter>
           </DialogContent>
