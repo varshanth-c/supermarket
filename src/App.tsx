@@ -14,6 +14,7 @@ import Sales from "./pages/Sales";
 import Expenses from "./pages/Expenses";
 import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
+import AdvancedAnalytics from "./pages/AdvancedAnalytics";
 
 const queryClient = new QueryClient();
 
@@ -42,9 +43,14 @@ const App = () => (
                 <Sales />
               </ProtectedRoute>
             } />
-            <Route path="/expenses" element={
+            <Route path="/expense" element={
               <ProtectedRoute>
                 <Expenses />
+              </ProtectedRoute>
+            } />
+            <Route path="/AdvancedAnalytics" element={
+              <ProtectedRoute>
+                <AdvancedAnalytics />
               </ProtectedRoute>
             } />
             <Route path="/reports" element={

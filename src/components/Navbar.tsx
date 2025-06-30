@@ -27,8 +27,9 @@ export const Navbar = () => {
     { path: '/dashboard', label: 'Dashboard', icon: BarChart3 },
     { path: '/inventory', label: 'Inventory', icon: Package },
     { path: '/sales', label: 'Sales', icon: ShoppingCart },
-    { path: '/expenses', label: 'Expenses', icon: Receipt },
+    { path: '/expense', label: 'Expenses', icon: Receipt },
     { path: '/reports', label: 'Reports', icon: FileText },
+    { path: '/AdvancedAnalytics', label: 'AdvancedAnalytics', icon: FileText },
   ];
 
   const isActive = (path: string) => location.pathname === path;
