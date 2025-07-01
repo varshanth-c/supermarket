@@ -106,7 +106,8 @@ const Expenses = () => {
       'Inventory': 'bg-green-100 text-green-800',
       'Marketing': 'bg-purple-100 text-purple-800',
       'Maintenance': 'bg-orange-100 text-orange-800',
-      'Miscellaneous': 'bg-gray-100 text-gray-800'
+      'Miscellaneous': 'bg-gray-100 text-gray-800',
+      'Electronics': 'bg-gray-100 text-gray-800'
     };
     return colors[category] || 'bg-gray-100 text-gray-800';
   };
