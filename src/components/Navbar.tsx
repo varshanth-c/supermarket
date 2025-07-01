@@ -30,6 +30,7 @@ export const Navbar = () => {
     { path: '/expense', label: 'Expenses', icon: Receipt },
     { path: '/reports', label: 'Reports', icon: FileText },
     { path: '/AdvancedAnalytics', label: 'AdvancedAnalytics', icon: FileText },
+    { path: '/customer-pos', label: 'CustomerPOSPage', icon: FileText },
   ];
 
   const isActive = (path: string) => location.pathname === path;

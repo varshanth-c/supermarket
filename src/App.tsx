@@ -15,6 +15,8 @@ import Expenses from "./pages/Expenses";
 import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
 import AdvancedAnalytics from "./pages/AdvancedAnalytics";
+// import CustomerPOSPage from "@/pages/app/customer-pos/page";
+
 
 const queryClient = new QueryClient();
 
@@ -43,6 +45,14 @@ const App = () => (
                 <Sales />
               </ProtectedRoute>
             } />
+            {/* <Route 
+          path="/customer-pos" 
+          element={
+            <ProtectedRoute>
+              <CustomerPOSPage />
+            </ProtectedRoute>
+          } 
+        /> */}
             <Route path="/expense" element={
               <ProtectedRoute>
                 <Expenses />
