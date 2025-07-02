@@ -21,8 +21,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
 import { format } from 'date-fns';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
-
+import autoTable from 'jspdf-autotable';
 // --- Type Definitions ---
 interface InventoryItem {
   id: string;
@@ -38,7 +37,7 @@ interface CartItem extends InventoryItem {
 }
 
 interface Customer {
-  name: string;
+  name:string;
   phone: string;
   email: string;
   address: string;
@@ -87,6 +86,18 @@ interface BillData {
   paymentMethod: 'cash' | 'online';
 }
 
+// --- Default Company Information ---
+const defaultCompanyInfo: CompanyInfo = {
+  name: 'Sri Lakshmi Supermarket',
+  address: '#45, Main Road, V.V. Nagar, Mandya, Karnataka - 571401',
+  phone: '+91 98765 43210',
+  email: 'srilakshmisupermarket@gmail.com',
+  upi_id: 'varshanthgowdaml@oksbi',
+  bank_name: 'State Bank of India',
+  account_number: 'XXXXXXX1234',
+  ifsc_code: 'SBIN000123456'
+};
+
 
 const Sales = () => {
   const { toast } = useToast();
@@ -100,20 +111,35 @@ const Sales = () => {
   const [notes, setNotes] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Load company info from localStorage or use default
+  // --- COMPANY INFO LOGIC FOR A SINGLE COMPANY ---
+  // Load company info from localStorage. If not present, use the hardcoded defaults.
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(() => {
-    const savedCompanyInfo = localStorage.getItem('companyInfo');
-    return savedCompanyInfo ? JSON.parse(savedCompanyInfo) : {
-      name: 'Your Company Name',
-      address: '123 Business St, Commerce City, 12345',
-      phone: '9876543210',
-      email: 'contact@yourcompany.com',
-      upi_id: 'your-upi-id@oksbi',
-      bank_name: 'Your Bank Name',
-      account_number: 'XXXXXXX1234',
-      ifsc_code: 'ABCD0123456'
-    };
+    try {
+        const savedCompanyInfo = localStorage.getItem('companyInfo');
+        // If there's saved info, parse it. Otherwise, use the defaults.
+        return savedCompanyInfo ? JSON.parse(savedCompanyInfo) : defaultCompanyInfo;
+    } catch (error) {
+        // If JSON parsing fails, fall back to defaults.
+        return defaultCompanyInfo;
+    }
   });
+
+  // Save company info to localStorage whenever it changes.
+  useEffect(() => {
+    localStorage.setItem('companyInfo', JSON.stringify(companyInfo));
+  }, [companyInfo]);
+
+  // Handler to save info from the dialog and show a toast.
+  const handleSaveCompanyInfo = () => {
+    // The useEffect above already handles the saving part.
+    // This function just closes the dialog and gives user feedback.
+    setShowCompanyDialog(false);
+    toast({
+        title: "Information Saved",
+        description: "The company details have been updated on this device.",
+    });
+  }
+  // --- END OF COMPANY INFO LOGIC ---
 
   const [activeTab, setActiveTab] = useState('cart');
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -129,12 +155,7 @@ const Sales = () => {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [completedBill, setCompletedBill] = useState<BillData | null>(null);
   
-  // Save company info to localStorage when changed
-  useEffect(() => {
-    localStorage.setItem('companyInfo', JSON.stringify(companyInfo));
-  }, [companyInfo]);
-
-  // --- Data Fetching & Mutations with Tanstack Query ---
+  // --- Data Fetching & Mutations (Now only for Inventory, Sales, etc.) ---
   const { data: inventoryItems = [], isLoading: isInventoryLoading } = useQuery({
     queryKey: ['inventory', user?.id],
     queryFn: async () => {
@@ -336,15 +357,18 @@ const Sales = () => {
       setCompletedBill(billData);
       setShowPaymentDialog(false);
       setShowSaleSuccessDialog(true);
-      resetSale();
 
       toast({
           title: "Transaction Complete!", 
           description: "Sale recorded successfully.",
           className: "bg-green-100 border-green-400",
       });
-    } catch (error: any) {
-      toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Transaction Failed", description: "An unknown error occurred.", variant: "destructive" });
+      }
     }
   };
 
@@ -362,8 +386,8 @@ const Sales = () => {
         i + 1,
         item.item_name,
         item.cart_quantity,
-        `₹${item.unit_price.toFixed(2)}`,
-        `₹${item.final_amount.toFixed(2)}`,
+        `${item.unit_price.toFixed(2)}`,
+        `${item.final_amount.toFixed(2)}`,
     ]);
 
     // Header
@@ -387,20 +411,21 @@ const Sales = () => {
     doc.text(bill.customer.phone, 196, 67, { align: 'right' });
     
     // Items Table
-    (doc as any).autoTable({
-        startY: 80,
-        head: [['Sr.', 'Description', 'Qty', 'Rate', 'Total']],
-        body: tableData,
-        theme: 'striped',
-        headStyles: { fillColor: [38, 38, 38] },
-    });
+    // Items Table
+autoTable(doc, { // This is the new, correct way to call it
+    startY: 80,
+    head: [['Sr.', 'Description', 'Qty', 'Rate', 'Total']],
+    body: tableData,
+    theme: 'striped',
+    headStyles: { fillColor: [38, 38, 38] },
+});
 
     // Totals
-    const finalY = (doc as any).lastAutoTable.finalY;
+    const finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 0;
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text(`Grand Total:`, 150, finalY + 24);
-    doc.text(`₹${bill.finalAmount.toFixed(2)}`, 196, finalY + 24, { align: 'right' });
+    doc.text(`${bill.finalAmount.toFixed(2)}`, 196, finalY + 24, { align: 'right' });
     
     // Payment Method
     doc.setFontSize(10);
@@ -479,6 +504,8 @@ const Sales = () => {
             </Button>
           </div>
         </header>
+        
+        {/* The rest of your JSX remains the same... */}
         
         <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column: Product Selection */}
@@ -645,7 +672,7 @@ const Sales = () => {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Company Information</DialogTitle>
-              <DialogDescription>This information will appear on your invoices</DialogDescription>
+              <DialogDescription>This information will appear on your invoices. It is saved on this device.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div><Label>Company Name *</Label><Input value={companyInfo.name} onChange={e => setCompanyInfo(p => ({ ...p, name: e.target.value }))} /></div>
@@ -656,16 +683,16 @@ const Sales = () => {
               <div className="pt-4 border-t mt-4">
                 <h3 className="font-medium mb-3">Payment Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div><Label>UPI ID</Label><Input placeholder="your-vpa@okbank" value={companyInfo.upi_id} onChange={e => setCompanyInfo(p => ({ ...p, upi_id: e.target.value }))} /></div>
-                  <div><Label>Bank Name</Label><Input value={companyInfo.bank_name} onChange={e => setCompanyInfo(p => ({ ...p, bank_name: e.target.value }))} /></div>
-                  <div><Label>Account Number</Label><Input value={companyInfo.account_number} onChange={e => setCompanyInfo(p => ({ ...p, account_number: e.target.value }))} /></div>
-                  <div><Label>IFSC Code</Label><Input value={companyInfo.ifsc_code} onChange={e => setCompanyInfo(p => ({ ...p, ifsc_code: e.target.value }))} /></div>
+                  <div><Label>UPI ID</Label><Input placeholder="your-vpa@okbank" value={companyInfo.upi_id || ''} onChange={e => setCompanyInfo(p => ({ ...p, upi_id: e.target.value }))} /></div>
+                  <div><Label>Bank Name</Label><Input value={companyInfo.bank_name || ''} onChange={e => setCompanyInfo(p => ({ ...p, bank_name: e.target.value }))} /></div>
+                  <div><Label>Account Number</Label><Input value={companyInfo.account_number || ''} onChange={e => setCompanyInfo(p => ({ ...p, account_number: e.target.value }))} /></div>
+                  <div><Label>IFSC Code</Label><Input value={companyInfo.ifsc_code || ''} onChange={e => setCompanyInfo(p => ({ ...p, ifsc_code: e.target.value }))} /></div>
                 </div>
               </div>
             </div>
             <DialogFooter>
               <Button 
-                onClick={() => setShowCompanyDialog(false)}
+                onClick={handleSaveCompanyInfo}
                 className="bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"
               >
                 <Save className="h-4 w-4 mr-2"/> Save Information
@@ -674,6 +701,8 @@ const Sales = () => {
           </DialogContent>
         </Dialog>
 
+        {/* The rest of your Dialogs remain unchanged... */}
+        
         <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
@@ -768,7 +797,12 @@ const Sales = () => {
                 <DialogFooter>
                     <Button 
                       className="w-full bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800"
-                      onClick={() => setShowSaleSuccessDialog(false)}
+                      onClick={() => {
+            setShowSaleSuccessDialog(false);
+            resetSale(); // <--- ADD THIS LINE
+          }}
+                       
+                      
                     >
                         <Plus className="h-4 w-4 mr-2"/>Start New Sale
                     </Button>
@@ -880,6 +914,7 @@ const Sales = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
       </div>
     </div>
   );

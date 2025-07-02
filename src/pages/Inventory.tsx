@@ -1132,6 +1132,9 @@ const Inventory = () => {
         </Dialog>
 
         {/* Barcode Scanner Dialog */}
+        // In Inventory.js...
+
+        {/* Barcode Scanner Dialog */}
         <Dialog open={showBarcodeScanner} onOpenChange={setShowBarcodeScanner}>
           <DialogContent className="bg-white rounded-xl">
             <DialogHeader>
@@ -1140,22 +1143,34 @@ const Inventory = () => {
                 Scan Barcode
               </DialogTitle>
               <DialogDescription>
-                Point your camera at the barcode
+                Point your camera at the barcode. A red box will appear when it's detected.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg border border-gray-200" />
-              <canvas ref={canvasRef} className="hidden" />
+              {/* This container makes the overlay possible */}
+              <div className="relative w-full aspect-video bg-gray-200 rounded-lg overflow-hidden">
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  playsInline 
+                  className="absolute top-0 left-0 w-full h-full object-cover" 
+                />
+                {/* The canvas is now visible and placed directly on top of the video */}
+                <canvas 
+                  ref={canvasRef} 
+                  className="absolute top-0 left-0 w-full h-full" 
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button 
-                className="bg-indigo-600 hover:bg-indigo-700 rounded-lg"
+                variant="outline"
                 onClick={() => {
                   setShowBarcodeScanner(false);
                   stopScanning();
                 }}
               >
-                Close
+                Cancel
               </Button>
             </DialogFooter>
           </DialogContent>

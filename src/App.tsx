@@ -93,7 +93,7 @@ import CustomerPOSPage from "./pages/CustomerPOSPage"; // <-- This is the Lite p
 import Expenses from "./pages/Expenses";
 import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
-import AdvancedAnalytics from "./pages/AdvancedAnalytics";
+import Dashboard1 from "./pages/Dashboard1";
 import CustomerDashboard from "./pages/d1";
 const queryClient = new QueryClient();
 
@@ -154,7 +154,7 @@ const App = () => (
             } />
             <Route path="/AdvancedAnalytics" element={
               <ProtectedRoute>
-                <AdvancedAnalytics />
+                <Dashboard1 />
               </ProtectedRoute>
             } />
             <Route path="/reports" element={
