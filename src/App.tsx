@@ -95,6 +95,7 @@ import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
 import Dashboard1 from "./pages/Dashboard1";
 import CustomerDashboard from "./pages/d1";
+import { ProfilePage } from './pages/ProfilePage'; 
 const queryClient = new QueryClient();
 
 // --- ADD THIS COMPONENT ---
@@ -124,14 +125,14 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/dashboard" element={
               <ProtectedRoute>
-                <Dashboard />
+                <DashboardRoute/>
               </ProtectedRoute>
             } />
-            <Route path="/customer-dashboard" element={
+            {/* <Route path="/customer-dashboard" element={
               <ProtectedRoute>
                 <CustomerDashboard />
               </ProtectedRoute>
-            } />
+            } /> */}
             <Route path="/inventory" element={
               <ProtectedRoute>
                 <Inventory />
@@ -146,6 +147,7 @@ const App = () => (
                 <SalesRoute />
               </ProtectedRoute>
             } />
+            <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
 
             <Route path="/expense" element={
               <ProtectedRoute>
