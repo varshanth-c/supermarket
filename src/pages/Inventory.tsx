@@ -36,7 +36,7 @@ interface InventoryItem {
   specifications?: any;
   is_available: boolean;
   cost_price: number;
-  offer_price?: number | null;
+  // offer_price?: number | null;
   sku?: string | null;
   supplier_id?: string | null;
   created_at?: string;
@@ -72,7 +72,7 @@ const Inventory = () => {
     specifications: null,
     is_available: true,
     cost_price: 0,
-    offer_price: null,
+    // offer_price: null,
     sku: null,
     supplier_id: null  // Important: Set to null instead of empty string
   });
@@ -114,7 +114,7 @@ const Inventory = () => {
         description: newItem.description || null,
         brand: newItem.brand || null,
         sku: newItem.sku || null,
-        offer_price: newItem.offer_price || null,
+        // offer_price: newItem.offer_price || null,
         specifications: newItem.specifications || null
       };
       
@@ -160,7 +160,7 @@ const Inventory = () => {
         description: updateData.description || null,
         brand: updateData.brand || null,
         sku: updateData.sku || null,
-        offer_price: updateData.offer_price || null,
+        // offer_price: updateData.offer_price || null,
         specifications: updateData.specifications || null
       };
       
@@ -255,7 +255,7 @@ const Inventory = () => {
       specifications: null,
       is_available: true,
       cost_price: 0,
-      offer_price: null,
+      // offer_price: null,
       sku: null,
       supplier_id: null  // Set to null
     });
@@ -317,7 +317,7 @@ const Inventory = () => {
       specifications: item.specifications || null,
       is_available: item.is_available,
       cost_price: item.cost_price,
-      offer_price: item.offer_price || null,
+      // offer_price: item.offer_price || null,
       sku: item.sku || null,
       supplier_id: item.supplier_id || null  // Set to null if empty
     });
@@ -619,12 +619,12 @@ const Inventory = () => {
                       <TableCell>
                         <div className="flex flex-col">
                           <div className="font-medium">₹{item.unit_price}</div>
-                          {item.offer_price && item.offer_price > 0 && (
+                          {/* {item.offer_price && item.offer_price > 0 && (
                             <div className="text-sm text-green-600 flex items-center">
                               <Tag className="h-3 w-3 mr-1" />
                               Offer: ₹{item.offer_price}
                             </div>
-                          )}
+                          )} */}
                           <div className="text-xs text-gray-500">
                             Cost: ₹{item.cost_price}
                           </div>
@@ -831,7 +831,7 @@ const Inventory = () => {
                   </div>
                 </div>
                 
-                <div>
+                {/* <div>
                   <Label htmlFor="offer_price" className="text-gray-700">Offer Price (₹)</Label>
                   <Input
                     id="offer_price"
@@ -846,7 +846,7 @@ const Inventory = () => {
                     min="0"
                   />
                 </div>
-                
+                 */}
                 <div>
                   <Label htmlFor="hsn_code" className="text-gray-700">HSN Code</Label>
                   <Input
@@ -1045,7 +1045,7 @@ const Inventory = () => {
                   </div>
                 </div>
                 
-                <div>
+                {/* <div>
                   <Label htmlFor="edit_offer_price" className="text-gray-700">Offer Price (₹)</Label>
                   <Input
                     id="edit_offer_price"
@@ -1059,7 +1059,7 @@ const Inventory = () => {
                     className="border-gray-300 rounded-lg"
                     min="0"
                   />
-                </div>
+                </div> */}
                 
                 <div>
                   <Label htmlFor="edit_hsn_code" className="text-gray-700">HSN Code</Label>
