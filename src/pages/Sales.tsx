@@ -23,6 +23,8 @@ import { format } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 // --- Type Definitions ---
+
+import { saveSaleOffline, getOfflineSales, clearOfflineSales } from '@/utils/offlineUtils';
 interface InventoryItem {
   id: string;
   item_name: string;
