@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo,useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Plus, ShoppingCart, Trash2, Camera, Download, Send, Printer, Save, Check, History,
-  Loader2, Minus, User, QrCode, CreditCard, FileText, Store, Sparkles, ServerOff, CheckCircle, Mail, Search
+  Loader2, Minus, User, QrCode, CreditCard, FileText, Store, Sparkles, UploadCloud,ServerOff, CheckCircle, Mail, Search
 } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
@@ -24,7 +24,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 // --- Type Definitions ---
 
-import { saveSaleOffline, getOfflineSales, clearOfflineSales } from '@/utils/offlineUtils';
+import { saveSaleOffline, getOfflineSales, deleteSyncedSale, BillData as OfflineBillData } from '@/utils/offlineUtils';
 interface InventoryItem {
   id: string;
   item_name: string;
@@ -76,18 +76,18 @@ interface BillItem {
   final_amount: number;
 }
 
-interface BillData {
-  billId: string;
-  items: BillItem[];
-  customer: Customer;
-  subtotal: number;
-  finalAmount: number;
-  notes: string;
-  timestamp: Date;
-  companyInfo: CompanyInfo;
-  paymentMethod: 'cash' | 'online';
-}
-
+// interface BillData {
+//   billId: string;
+//   items: BillItem[];
+//   customer: Customer;
+//   subtotal: number;
+//   finalAmount: number;
+//   notes: string;
+//   timestamp: Date;
+//   companyInfo: CompanyInfo;
+//   paymentMethod: 'cash' | 'online';
+// }
+interface BillData extends OfflineBillData {}
 // --- Default Company Information ---
 const defaultCompanyInfo: CompanyInfo = {
   name: 'Sri Lakshmi Supermarket',
@@ -144,8 +144,11 @@ const Sales = () => {
   // --- END OF COMPANY INFO LOGIC ---
 
   const [activeTab, setActiveTab] = useState('cart');
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [pendingSaleCount, setPendingSaleCount] = useState(0);
+  const [lastSaleWasOffline, setLastSaleWasOffline] = useState(false);
   // Dialog visibility states
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [showCompanyDialog, setShowCompanyDialog] = useState(false);
@@ -178,43 +181,136 @@ const Sales = () => {
     enabled: !!user?.id,
   });
 
-  const saveSaleMutation = useMutation({
-    mutationFn: async ({ billData }: { billData: BillData }) => {
-      const { data, error } = await supabase
-        .from('sales')
-        .insert({
-          user_id: user!.id,
-          customer_name: billData.customer.name,
-          customer_phone: billData.customer.phone,
-          customer_email: billData.customer.email,
-          items: JSON.stringify(billData.items),
-          total_amount: billData.finalAmount,
-          bill_data: JSON.stringify(billData),
-          payment_status: 'completed',
-        })
-        .select()
-        .single();
-      if (error) throw new Error(error.message);
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sales-history'] });
-    },
-  });
+  // const saveSaleMutation = useMutation({
+  //   mutationFn: async ({ billData }: { billData: BillData }) => {
+  //     const { data, error } = await supabase
+  //       .from('sales')
+  //       .insert({
+  //         user_id: user!.id,
+  //         customer_name: billData.customer.name,
+  //         customer_phone: billData.customer.phone,
+  //         customer_email: billData.customer.email,
+  //         items: JSON.stringify(billData.items),
+  //         total_amount: billData.finalAmount,
+  //         bill_data: JSON.stringify(billData),
+  //         payment_status: 'completed',
+  //       })
+  //       .select()
+  //       .single();
+  //     if (error) throw new Error(error.message);
+  //     return data;
+  //   },
+  //   onSuccess: () => {
+  //     queryClient.invalidateQueries({ queryKey: ['sales-history'] });
+  //   },
+  // });
 
-  const updateInventoryMutation = useMutation({
-    mutationFn: async (items: CartItem[]) => {
-      const updates = items.map(item =>
-        supabase.from('inventory').update({ quantity: item.quantity - item.cart_quantity }).eq('id', item.id)
-      );
-      const results = await Promise.all(updates);
-      results.forEach(({ error }) => { if (error) throw new Error(error.message); });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inventory'] });
-    },
-  });
+  // const updateInventoryMutation = useMutation({
+  //   mutationFn: async (items: CartItem[]) => {
+  //     const updates = items.map(item =>
+  //       supabase.from('inventory').update({ quantity: item.quantity - item.cart_quantity }).eq('id', item.id)
+  //     );
+  //     const results = await Promise.all(updates);
+  //     results.forEach(({ error }) => { if (error) throw new Error(error.message); });
+  //   },
+  //   onSuccess: () => {
+  //     queryClient.invalidateQueries({ queryKey: ['inventory'] });
+  //   },
+  // });
+  // DELETE your old `saveSaleMutation` and `updateInventoryMutation`.
+// REPLACE them with this single `processSaleMutation`.
+// Add this line with your other useState hooks
+const [transactionId, setTransactionId] = useState('');
+const processSaleMutation = useMutation({
+  mutationFn: async (billData: BillData) => {
+      // This calls the Edge Function you wrote
+      const { data, error } = await supabase.functions.invoke('process-sale', {
+          body: { billData },
+      });
+      if (error) {
+          throw new Error(`Transaction failed: ${error.message}`);
+      }
+      return data;
+  },
+  onSuccess: () => {
+      // Invalidate queries to refetch fresh data from the server
+      queryClient.invalidateQueries({ queryKey: ['inventory', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['sales-history', user?.id] });
+  },
+});
+// Add this entire new block of code inside your component
+
+const syncOfflineSales = useCallback(async () => {
+  if (isSyncing || !user) return; // Prevent multiple syncs
+
+  setIsSyncing(true);
+  const pendingSales = await getOfflineSales();
+  setPendingSaleCount(pendingSales.length);
+
+  if (pendingSales.length === 0) {
+    setIsSyncing(false);
+    return;
+  }
+
+  toast({ title: 'Syncing...', description: `Uploading ${pendingSales.length} offline sale(s).` });
+
+  let successCount = 0;
+  for (const billData of pendingSales) {
+    try {
+      await processSaleMutation.mutateAsync(billData);
+      await deleteSyncedSale(billData.billId);
+      successCount++;
+    } catch (error) {
+      console.error(`Failed to sync sale ${billData.billId}:`, error);
+      toast({
+        title: 'Sync Error',
+        description: `Could not sync sale ${billData.billId}. It will be retried later.`,
+        variant: 'destructive',
+      });
+    }
+  }
   
+  if (successCount > 0) {
+      toast({
+          title: 'Sync Complete',
+          description: `${successCount} sale(s) successfully synced.`,
+          className: "bg-green-100 border-green-400",
+      });
+  }
+
+  const remainingSales = await getOfflineSales();
+  setPendingSaleCount(remainingSales.length);
+  setIsSyncing(false);
+}, [isSyncing, user, processSaleMutation, toast, queryClient]);
+
+// Add this new `useEffect` hook inside your component
+
+useEffect(() => {
+  const updateOnlineStatus = () => {
+    const isOnline = navigator.onLine;
+    setIsOffline(!isOnline);
+    if (isOnline) {
+      toast({ title: "You are back online!", description: "Checking for pending sales to sync." });
+      syncOfflineSales(); // Attempt to sync when connection is restored
+    } else {
+      toast({ title: "You are offline", description: "Sales will be saved locally.", variant: "destructive" });
+    }
+  };
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+  
+  // Initial check on component load
+  getOfflineSales().then(sales => setPendingSaleCount(sales.length));
+  if (navigator.onLine) {
+      syncOfflineSales();
+  }
+  
+  return () => {
+    window.removeEventListener('online', updateOnlineStatus);
+    window.removeEventListener('offline', updateOnlineStatus);
+  };
+}, [syncOfflineSales, toast]);
+
   const sendEmailMutation = useMutation({
     mutationFn: async (vars: { customerEmail: string; customerName: string; billId: string; pdfBase64: string }) => {
       const { error } = await supabase.functions.invoke('send-invoice', {
@@ -324,55 +420,133 @@ const Sales = () => {
     }
   };
   
-  const proceedToPayment = () => {
+  // const proceedToPayment = () => {
+  //   if (cart.length === 0) {
+  //     toast({ title: "Empty Cart", description: "Please add items to the cart first.", variant: "destructive" });
+  //     return;
+  //   }
+  //   if (!customer.name || !customer.phone) {
+  //       toast({ title: "Customer Info Missing", description: "Please enter customer name and phone number.", variant: "destructive" });
+  //       return;
+  //   }
+  //   setShowPaymentDialog(true);
+  // };
+  
+  // Find this function...
+// const proceedToPayment = () => {
+//     if (cart.length === 0) {
+//       toast({ title: "Empty Cart", /* ... */ });
+//       return;
+//     }
+//     if (!customer.name || !customer.phone) {
+//         toast({ title: "Customer Info Missing", /* ... */ });
+//         return;
+//     }
+//     setShowPaymentDialog(true);
+// };
+
+// ...and MODIFY it to look like this:
+const proceedToPayment = () => {
     if (cart.length === 0) {
       toast({ title: "Empty Cart", description: "Please add items to the cart first.", variant: "destructive" });
       return;
     }
     if (!customer.name || !customer.phone) {
         toast({ title: "Customer Info Missing", description: "Please enter customer name and phone number.", variant: "destructive" });
+        setActiveTab('customer'); // Also a good idea to switch to the customer tab
         return;
     }
+    
+    // Generate the ID ONCE and store it in state
+    setTransactionId(`INV-${Date.now()}`); 
+    
+    // Now, show the dialog
     setShowPaymentDialog(true);
   };
 
-  const completeSale = async (paymentMethod: 'cash' | 'online') => {
-    const billData: BillData = {
-      billId: `INV-${Date.now()}`,
-      items: cartTotals.items,
-      customer,
-      subtotal: cartTotals.subtotal,
-      finalAmount: cartTotals.finalAmount,
-      notes,
-      timestamp: new Date(),
-      companyInfo,
-      paymentMethod,
-    };
+  // const completeSale = async (paymentMethod: 'cash' | 'online') => {
+  //   const billData: BillData = {
+  //     billId: `INV-${Date.now()}`,
+  //     items: cartTotals.items,
+  //     customer,
+  //     subtotal: cartTotals.subtotal,
+  //     finalAmount: cartTotals.finalAmount,
+  //     notes,
+  //     timestamp: new Date(),
+  //     companyInfo,
+  //     paymentMethod,
+  //   };
     
-    try {
-      // These can run in parallel
-      await Promise.all([
-          updateInventoryMutation.mutateAsync(cart),
-          saveSaleMutation.mutateAsync({ billData })
-      ]);
+  //   try {
+  //     // These can run in parallel
+  //     await Promise.all([
+  //         updateInventoryMutation.mutateAsync(cart),
+  //         saveSaleMutation.mutateAsync({ billData })
+  //     ]);
       
-      setCompletedBill(billData);
-      setShowPaymentDialog(false);
-      setShowSaleSuccessDialog(true);
+  //     setCompletedBill(billData);
+  //     setShowPaymentDialog(false);
+  //     setShowSaleSuccessDialog(true);
 
-      toast({
-          title: "Transaction Complete!", 
-          description: "Sale recorded successfully.",
-          className: "bg-green-100 border-green-400",
-      });
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
-      } else {
-        toast({ title: "Transaction Failed", description: "An unknown error occurred.", variant: "destructive" });
-      }
-    }
+  //     toast({
+  //         title: "Transaction Complete!", 
+  //         description: "Sale recorded successfully.",
+  //         className: "bg-green-100 border-green-400",
+  //     });
+  //   } catch (error: unknown) {
+  //     if (error instanceof Error) {
+  //       toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+  //     } else {
+  //       toast({ title: "Transaction Failed", description: "An unknown error occurred.", variant: "destructive" });
+  //     }
+  //   }
+  // };
+  // DELETE your entire old `completeSale` function.
+// REPLACE it with this new, smarter version.
+
+const completeSale = async (paymentMethod: 'cash' | 'online') => {
+  if (!user) {
+      toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+      return;
+  }
+
+  const billData: BillData = {
+    billId: `INV-${Date.now()}`,
+    items: cartTotals.items,
+    customer,
+    subtotal: cartTotals.subtotal,
+    finalAmount: cartTotals.finalAmount,
+    notes,
+    timestamp: new Date(),
+    companyInfo,
+    paymentMethod,
+    userId: user.id, // IMPORTANT: Pass the user ID
   };
+
+  setCompletedBill(billData);
+  setShowPaymentDialog(false);
+
+  if (isOffline) {
+    // --- OFFLINE PATH ---
+    try {
+      await saveSaleOffline(billData);
+      setLastSaleWasOffline(true);
+      setPendingSaleCount(prev => prev + 1);
+      setShowSaleSuccessDialog(true);
+    } catch (error) {
+      toast({ title: "Offline Save Failed", variant: "destructive" });
+    }
+  } else {
+    // --- ONLINE PATH ---
+    try {
+      await processSaleMutation.mutateAsync(billData);
+      setLastSaleWasOffline(false);
+      setShowSaleSuccessDialog(true);
+    } catch (error: any) {
+      toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+    }
+  }
+};
 
   const resetSale = () => {
     setCart([]);
@@ -497,14 +671,20 @@ autoTable(doc, { // This is the new, correct way to call it
             <p className="text-gray-600 dark:text-gray-400 mt-2">A modern POS for seamless transaction management</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {isOffline && <Badge variant="destructive" className="flex items-center gap-1"><ServerOff className="h-4 w-4"/>Offline Mode</Badge>}
-            <Button onClick={startBarcodeScan} variant="outline" className="bg-white dark:bg-gray-800">
-              <Camera className="h-4 w-4 mr-2"/> Scan Barcode
-            </Button>
-            <Button onClick={() => setShowCompanyDialog(true)} variant="outline" className="bg-white dark:bg-gray-800">
-              <FileText className="h-4 w-4 mr-2"/> Company Info
-            </Button>
-          </div>
+  {isOffline && <Badge variant="destructive" className="flex items-center gap-1.5 py-1 px-2"><ServerOff className="h-4 w-4"/>Offline Mode</Badge>}
+  {pendingSaleCount > 0 && !isOffline && (
+      <Button onClick={syncOfflineSales} variant="outline" disabled={isSyncing}>
+          {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin"/> : <UploadCloud className="h-4 w-4 mr-2"/>}
+          Sync {pendingSaleCount} Sale(s)
+      </Button>
+  )}
+  <Button onClick={startBarcodeScan} variant="outline" className="bg-white dark:bg-gray-800">
+    <Camera className="h-4 w-4 mr-2"/> Scan Barcode
+  </Button>
+  <Button onClick={() => setShowCompanyDialog(true)} variant="outline" className="bg-white dark:bg-gray-800">
+    <FileText className="h-4 w-4 mr-2"/> Company Info
+  </Button>
+</div>
         </header>
         
         {/* The rest of your JSX remains the same... */}
@@ -705,7 +885,7 @@ autoTable(doc, { // This is the new, correct way to call it
 
         {/* The rest of your Dialogs remain unchanged... */}
         
-        <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+        {/* <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Complete Payment</DialogTitle>
@@ -764,54 +944,160 @@ autoTable(doc, { // This is the new, correct way to call it
                 </Tabs>
             </DialogContent>
         </Dialog>
-        
-        <Dialog open={showSaleSuccessDialog} onOpenChange={setShowSaleSuccessDialog}>
-            <DialogContent className="max-w-lg">
-                <DialogHeader className="text-center">
-                    <Sparkles className="h-16 w-16 mx-auto text-green-500 bg-green-100 p-3 rounded-full"/>
-                    <DialogTitle className="text-2xl mt-4">Transaction Successful!</DialogTitle>
-                    <DialogDescription>The sale has been completed and recorded</DialogDescription>
-                </DialogHeader>
-                <div className="py-6 space-y-3">
-                    <Button 
-                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800" 
-                      variant="outline" 
-                      onClick={() => generatePdfInvoice(completedBill, 'save')}
-                    >
-                        <Download className="h-4 w-4 mr-2"/>Download PDF Invoice
-                    </Button>
-                    {completedBill?.customer.email && (
-                      <Button 
-                          className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800" 
-                          variant="outline"
-                          onClick={handleSendEmail}
-                          disabled={sendEmailMutation.isPending}
-                      >
-                          {sendEmailMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin"/>
-                          ) : (
-                              <Mail className="h-4 w-4 mr-2"/>
-                          )}
-                          Send Invoice via Email
-                      </Button>
-                    )}
-                </div>
-                <DialogFooter>
-                    <Button 
-                      className="w-full bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800"
-                      onClick={() => {
-            setShowSaleSuccessDialog(false);
-            resetSale(); // <--- ADD THIS LINE
-          }}
-                       
-                      
-                    >
-                        <Plus className="h-4 w-4 mr-2"/>Start New Sale
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+         */}
+         // REPLACE your entire Payment Dialog with this corrected version
 
+{/* <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+    <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Complete Payment</DialogTitle>
+          <DialogDescription>Choose a payment method to finalize the sale</DialogDescription>
+        </DialogHeader>
+        <Tabs defaultValue="upi" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 bg-gray-100 dark:bg-gray-800">
+                <TabsTrigger value="upi"><QrCode className="h-4 w-4 mr-2"/>UPI / QR</TabsTrigger>
+                <TabsTrigger value="cash"><CreditCard className="h-4 w-4 mr-2"/>Cash</TabsTrigger>
+            </TabsList>
+            <TabsContent value="upi" className="text-center p-4 space-y-4">
+                <p>Scan the QR code to pay <strong className="text-lg">₹{cartTotals.finalAmount.toFixed(2)}</strong>.</p>
+                <div className="p-4 bg-white inline-block rounded-lg border-2 border-dashed border-gray-300">
+                    <QRCodeSVG
+                        value={`upi://pay?pa=${companyInfo.upi_id}&pn=${encodeURIComponent(companyInfo.name)}&am=${cartTotals.finalAmount.toFixed(2)}&tn=${`INV-${Date.now()}`}`}
+                        size={200}
+                    />
+                </div>
+                <p className="text-xs text-gray-500">To: {companyInfo.upi_id}</p>
+                
+                <Button 
+                  className="w-full"
+                  onClick={() => completeSale('online')}
+                  disabled={processSaleMutation.isPending && !isOffline}
+                >
+                    {(processSaleMutation.isPending && !isOffline) ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    {isOffline ? 'Save Sale Offline' : 'Confirm Payment'}
+                </Button>
+            </TabsContent>
+            <TabsContent value="cash" className="p-4 space-y-4">
+                <div className="text-center p-6 border rounded-lg bg-gray-50 dark:bg-gray-800">
+                    <p className="text-gray-600 dark:text-gray-400">Total Amount Due</p>
+                    <p className="text-4xl font-bold text-primary">₹{cartTotals.finalAmount.toFixed(2)}</p>
+                </div>
+                
+                 <Button 
+                   className="w-full"
+                   onClick={() => completeSale('cash')}
+                   disabled={processSaleMutation.isPending && !isOffline}
+                 >
+                   {(processSaleMutation.isPending && !isOffline) ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Check className="h-4 w-4 mr-2"/>}
+                   {isOffline ? 'Save Sale Offline' : 'Confirm Cash Payment'}
+                 </Button>
+            </TabsContent>
+        </Tabs>
+    </DialogContent>
+</Dialog> */}
+// REPLACE your entire Payment Dialog with this corrected version
+
+<Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+    <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Complete Payment</DialogTitle>
+          <DialogDescription>Choose a payment method to finalize the sale</DialogDescription>
+        </DialogHeader>
+        <Tabs defaultValue="upi" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 bg-gray-100 dark:bg-gray-800">
+                <TabsTrigger value="upi"><QrCode className="h-4 w-4 mr-2"/>UPI / QR</TabsTrigger>
+                <TabsTrigger value="cash"><CreditCard className="h-4 w-4 mr-2"/>Cash</TabsTrigger>
+            </TabsList>
+            <TabsContent value="upi" className="text-center p-4 space-y-4">
+                <p>Scan the QR code to pay <strong className="text-lg">₹{cartTotals.finalAmount.toFixed(2)}</strong>.</p>
+                <div className="p-4 bg-white inline-block rounded-lg border-2 border-dashed border-gray-300">
+                    <QRCodeSVG
+                        // --- CORRECTED LOGIC HERE ---
+                        value={`upi://pay?pa=${companyInfo.upi_id}&pn=${encodeURIComponent(companyInfo.name)}&am=${cartTotals.finalAmount.toFixed(2)}&tn=${transactionId}`}
+                        size={200}
+                    />
+                </div>
+                <p className="text-xs text-gray-500">To: {companyInfo.upi_id}</p>
+                
+                <Button 
+                  className="w-full"
+                  onClick={() => completeSale('online')}
+                  disabled={processSaleMutation.isPending && !isOffline}
+                >
+                    {(processSaleMutation.isPending && !isOffline) ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    {isOffline ? 'Save Sale Offline' : 'Confirm Payment'}
+                </Button>
+            </TabsContent>
+            <TabsContent value="cash" className="p-4 space-y-4">
+                <div className="text-center p-6 border rounded-lg bg-gray-50 dark:bg-gray-800">
+                    <p className="text-gray-600 dark:text-gray-400">Total Amount Due</p>
+                    <p className="text-4xl font-bold text-primary">₹{cartTotals.finalAmount.toFixed(2)}</p>
+                </div>
+                 <Button 
+                   className="w-full"
+                   onClick={() => completeSale('cash')}
+                   disabled={processSaleMutation.isPending && !isOffline}
+                 >
+                   {(processSaleMutation.isPending && !isOffline) ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Check className="h-4 w-4 mr-2"/>}
+                   {isOffline ? 'Save Sale Offline' : 'Confirm Cash Payment'}
+                 </Button>
+            </TabsContent>
+        </Tabs>
+    </DialogContent>
+</Dialog>
+
+<Dialog open={showSaleSuccessDialog} onOpenChange={setShowSaleSuccessDialog}>
+  <DialogContent className="max-w-lg">
+    <DialogHeader className="text-center">
+      {lastSaleWasOffline ? (
+        <UploadCloud className="h-16 w-16 mx-auto text-blue-500 bg-blue-100 p-3 rounded-full"/>
+      ) : (
+        <Sparkles className="h-16 w-16 mx-auto text-green-500 bg-green-100 p-3 rounded-full"/>
+      )}
+      <DialogTitle className="text-2xl mt-4">
+        {lastSaleWasOffline ? "Sale Saved Offline!" : "Transaction Successful!"}
+      </DialogTitle>
+      <DialogDescription>
+        {lastSaleWasOffline 
+          ? "This sale will be automatically uploaded when you're back online."
+          : "The sale has been recorded on the server."
+        }
+      </DialogDescription>
+    </DialogHeader>
+    <div className="py-6 space-y-3">
+      <Button 
+        className="w-full" 
+        variant="outline" 
+        onClick={() => generatePdfInvoice(completedBill, 'save')}
+      >
+        <Download className="h-4 w-4 mr-2"/>Download PDF Invoice
+      </Button>
+      {/* {completedBill?.customer.email && (
+        <Button 
+          className="w-full" 
+          variant="outline"
+          onClick={handleSendEmail}
+          disabled={sendEmailMutation.isPending || lastSaleWasOffline}
+        >
+          {sendEmailMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin"/> : <Mail className="h-4 w-4 mr-2"/>}
+          Send Invoice via Email
+          {lastSaleWasOffline && <span className="text-xs ml-2">(Online only)</span>}
+        </Button>
+      )} */}
+    </div>
+    <DialogFooter>
+      <Button 
+        className="w-full"
+        onClick={() => {
+          setShowSaleSuccessDialog(false);
+          resetSale(); // Important: Reset the form for the next sale!
+        }}
+      >
+        <Plus className="h-4 w-4 mr-2"/>Start New Sale
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
         <Dialog open={showSaleHistoryDialog} onOpenChange={setShowSaleHistoryDialog}>
           <DialogContent className="max-w-3xl">
               <DialogHeader>

@@ -53,7 +53,7 @@ export const FinancialMetricsCard: React.FC<FinancialMetricsCardProps> = ({ data
               Net Profit
             </div>
             <div className={`text-xl font-bold ${profitColor}`}>
-              ${data.net_profit.toLocaleString()}
+              ₹{data.net_profit.toLocaleString()}
             </div>
           </div>
           

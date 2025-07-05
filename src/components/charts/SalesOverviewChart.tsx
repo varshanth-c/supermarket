@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -17,8 +16,10 @@ export const SalesOverviewChart: React.FC<SalesOverviewChartProps> = ({ data }) 
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  // --- CHANGE IS HERE ---
   const formatCurrency = (value: number) => {
-    return `$${value.toLocaleString()}`;
+    // Replaced '$' with '₹' and used 'en-IN' for Indian number formatting (e.g., 1,00,000)
+    return `₹${value.toLocaleString('en-IN')}`;
   };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -43,6 +44,7 @@ export const SalesOverviewChart: React.FC<SalesOverviewChartProps> = ({ data }) 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
+        {/* This will now automatically display in Rupees */}
         <div className="text-2xl font-bold text-slate-900">
           {formatCurrency(data.reduce((sum, item) => sum + item.total_amount, 0))}
         </div>
@@ -72,12 +74,14 @@ export const SalesOverviewChart: React.FC<SalesOverviewChartProps> = ({ data }) 
               axisLine={false}
               tickLine={false}
             />
+            {/* The Y-Axis will now automatically display in Rupees */}
             <YAxis 
               tickFormatter={formatCurrency}
               tick={{ fontSize: 12, fill: '#64748B' }}
               axisLine={false}
               tickLine={false}
             />
+            {/* The Tooltip will now automatically display in Rupees */}
             <Tooltip content={<CustomTooltip />} />
             <Area 
               type="monotone" 

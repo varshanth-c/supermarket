@@ -22,7 +22,7 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ data }) => {
         <div className="bg-white p-3 border border-slate-200 rounded-lg shadow-lg">
           <p className="text-sm font-medium text-slate-900">{payload[0].payload.dayLabel}</p>
           <p className="text-sm text-purple-600">
-            Predicted Sales: <span className="font-semibold">${payload[0].value.toLocaleString()}</span>
+            Predicted Sales: <span className="font-semibold">{payload[0].value.toLocaleString()}</span>
           </p>
         </div>
       );
@@ -35,13 +35,13 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ data }) => {
       <div className="flex justify-between items-center">
         <div>
           <div className="text-lg font-semibold text-slate-900">
-            ${totalForecast.toLocaleString()}
+            ₹{totalForecast.toLocaleString()}
           </div>
           <div className="text-sm text-slate-600">Predicted Total</div>
         </div>
         <div className="text-right">
           <div className="text-lg font-semibold text-purple-600">
-            ${Math.round(averageDaily).toLocaleString()}
+            ₹{Math.round(averageDaily).toLocaleString()}
           </div>
           <div className="text-sm text-slate-600">Daily Average</div>
         </div>
@@ -57,7 +57,7 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ data }) => {
               tickLine={false}
             />
             <YAxis 
-              tickFormatter={(value) => `$${value}`}
+              tickFormatter={(value) => `₹${value}`}
               tick={{ fontSize: 12, fill: '#64748B' }}
               axisLine={false}
               tickLine={false}
@@ -82,7 +82,7 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({ data }) => {
       </div>
       
       <div className="text-xs text-slate-500 bg-slate-50 p-2 rounded">
-        🔮 <strong>AI Forecast:</strong> Based on historical patterns, plan for approximately ${Math.round(averageDaily).toLocaleString()} in daily sales. 
+        🔮 <strong>AI Forecast:</strong> Based on historical patterns, plan for approximately ₹{Math.round(averageDaily).toLocaleString()} in daily sales. 
         Stock up before weekend peaks and ensure adequate staffing.
       </div>
     </div>

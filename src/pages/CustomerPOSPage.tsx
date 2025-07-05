@@ -631,7 +631,7 @@ const CustomerPOSPage = () => {
   const [customer, setCustomer] = useState<Customer>({ name: '', phone: '', email: '', address: '' });
   const [notes, setNotes] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [companyInfo] = useState<CompanyInfo>(() => { const saved = localStorage.getItem('companyInfo'); return saved ? JSON.parse(saved) : { name: 'Your Company', address: '123 Business St', phone: '9876543210', email: 'contact@company.com', upi_id: 'your-upi-id@okhdfcbank' }; });
+  const [companyInfo] = useState<CompanyInfo>(() => { const saved = localStorage.getItem('companyInfo'); return saved ? JSON.parse(saved) : { name: 'Your Company', address: '123 Business St', phone: '9876543210', email: 'contact@company.com', upi_id: 'varshanthgowdaml@oksbi' }; });
   const [activeTab, setActiveTab] = useState('cart');
   const [loadedPendingOrderId, setLoadedPendingOrderId] = useState<string | null>(null);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);

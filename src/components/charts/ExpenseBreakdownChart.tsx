@@ -83,7 +83,7 @@ export const ExpenseBreakdownChart: React.FC<ExpenseBreakdownChartProps> = ({ da
               style={{ backgroundColor: item.color }}
             ></div>
             <span className="text-slate-600 truncate">
-              {item.category}: ${item.amount.toLocaleString()}
+              {item.category}: ₹{item.amount.toLocaleString()}
             </span>
           </div>
         ))}

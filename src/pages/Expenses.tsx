@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +10,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Receipt, Calendar as CalendarIcon, Filter, TrendingDown } from 'lucide-react';
+// NEW: Import AlertDialog components and Trash2 icon
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Plus, Receipt, Calendar as CalendarIcon, Filter, TrendingDown, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Navbar } from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
@@ -97,6 +98,34 @@ const Expenses = () => {
       console.error('Add expense error:', error);
     }
   });
+
+  // NEW: Delete expense mutation
+  const deleteExpenseMutation = useMutation({
+    mutationFn: async (expenseId: string) => {
+      const { error } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', expenseId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      toast({
+        title: "Success",
+        description: "Expense deleted successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to delete expense.",
+        variant: "destructive",
+      });
+      console.error('Delete expense error:', error);
+    },
+  });
+
 
   const getCategoryColor = (category: string) => {
     const colors: { [key: string]: string } = {
@@ -358,6 +387,8 @@ const Expenses = () => {
                     <TableHead>Category</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Amount</TableHead>
+                    {/* NEW: Add Actions column header */}
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -372,6 +403,34 @@ const Expenses = () => {
                       <TableCell>{expense.description}</TableCell>
                       <TableCell className="font-semibold text-red-600">
                         ₹{Number(expense.amount).toLocaleString()}
+                      </TableCell>
+                      {/* NEW: Add delete button with confirmation dialog */}
+                      <TableCell className="text-right">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" disabled={deleteExpenseMutation.isPending}>
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This action cannot be undone. This will permanently delete this expense record.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction 
+                                className="bg-red-600 hover:bg-red-700"
+                                onClick={() => deleteExpenseMutation.mutate(expense.id)}
+                                disabled={deleteExpenseMutation.isPending}
+                              >
+                                {deleteExpenseMutation.isPending ? 'Deleting...' : 'Delete'}
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </TableCell>
                     </TableRow>
                   ))}

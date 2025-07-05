@@ -31,7 +31,7 @@ export const ProfitabilityChart: React.FC<ProfitabilityChartProps> = ({ data }) 
   return (
     <div className="space-y-4">
       <div className="text-right text-sm text-slate-600">
-        Total Profit: <span className="font-semibold text-green-600">${totalProfit.toLocaleString()}</span>
+        Total Profit: <span className="font-semibold text-green-600">₹{totalProfit.toLocaleString()}</span>
       </div>
       
       <div className="h-64">
@@ -48,7 +48,7 @@ export const ProfitabilityChart: React.FC<ProfitabilityChartProps> = ({ data }) 
               height={80}
             />
             <YAxis 
-              tickFormatter={(value) => `$${value}`}
+              tickFormatter={(value) => `₹${value}`}
               tick={{ fontSize: 12, fill: '#64748B' }}
               axisLine={false}
               tickLine={false}

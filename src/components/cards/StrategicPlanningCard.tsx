@@ -96,9 +96,9 @@ export const StrategicPlanningCard: React.FC<StrategicPlanningCardProps> = ({ da
             <div className="bg-blue-50 p-3 rounded border">
               <h4 className="text-sm font-semibold text-blue-900 mb-2">Projected Results:</h4>
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <div>New Sales: <span className="font-semibold text-green-600">${scenario.sales.toLocaleString()}</span></div>
-                <div>New Expenses: <span className="font-semibold text-orange-600">${scenario.expenses.toLocaleString()}</span></div>
-                <div>New Profit: <span className="font-semibold text-green-600">${scenario.profit.toLocaleString()}</span></div>
+                <div>New Sales: <span className="font-semibold text-green-600">₹{scenario.sales.toLocaleString()}</span></div>
+                <div>New Expenses: <span className="font-semibold text-orange-600">₹{scenario.expenses.toLocaleString()}</span></div>
+                <div>New Profit: <span className="font-semibold text-green-600">₹{scenario.profit.toLocaleString()}</span></div>
                 <div>New Margin: <span className="font-semibold text-blue-600">{scenario.margin.toFixed(1)}%</span></div>
               </div>
               <div className="mt-2 text-xs">
@@ -117,8 +117,8 @@ export const StrategicPlanningCard: React.FC<StrategicPlanningCardProps> = ({ da
               </div>
               
               <div className="bg-slate-50 p-2 rounded text-xs space-y-1">
-                <div>• Revenue Target: ${(data.total_sales * 1.3).toLocaleString()} (+30%)</div>
-                <div>• Profit Target: ${(data.net_profit * 1.5).toLocaleString()} (+50%)</div>
+                <div>• Revenue Target: ₹{(data.total_sales * 1.3).toLocaleString()} (+30%)</div>
+                <div>• Profit Target: ₹{(data.net_profit * 1.5).toLocaleString()} (+50%)</div>
                 <div>• Margin Target: {Math.min(data.profit_margin + 5, 35).toFixed(1)}%</div>
               </div>
             </div>
